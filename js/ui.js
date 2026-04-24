@@ -247,33 +247,129 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadHistory() {
-        const sets = await DB.getAllSets();
+        const sets = await DB.getAllSets(); // newest-first
         const container = document.getElementById('history-container');
         container.innerHTML = '';
-
-        if (sets.length === 0) {
-            container.innerHTML = '<p style="padding:20px;">No workout history found.</p>';
-            return;
+        if (!sets.length) { container.innerHTML = '<p style="padding:20px;">No workout history found.</p>'; return; }
+    
+        // ── Heatmap (last 84 days) ───────────────────────────────────────────────
+        const countByDate = {};
+        sets.forEach(s => { const k = new Date(s.timestamp).toDateString(); countByDate[k] = (countByDate[k]||0)+1; });
+        const heatmap = document.createElement('div');
+        heatmap.className = 'heatmap';
+        for (let i = 83; i >= 0; i--) {
+            const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
+            const n = countByDate[d.toDateString()]||0;
+            const c = document.createElement('div');
+            c.className = `heat-cell${n>8?' heat-3':n>3?' heat-2':n>0?' heat-1':''}`;
+            heatmap.appendChild(c);
         }
-
-        let currentDate = '';
-        let currentList = null;
-
-        sets.forEach(set => {
-            const dateStr = new Date(set.timestamp).toLocaleDateString();
-            if (dateStr !== currentDate) {
-                currentDate = dateStr;
-                const header = document.createElement('h2');
-                header.className = 'history-date';
-                header.textContent = dateStr;
-                container.appendChild(header);
-
-                currentList = document.createElement('ul');
-                currentList.className = 'set-list';
-                container.appendChild(currentList);
-            }
-            currentList.appendChild(createSetElement(set));
+        container.appendChild(heatmap);
+    
+        // ── Filter chips ─────────────────────────────────────────────────────────
+        const exercises = [...new Set(sets.map(s => s.exercise))].sort();
+        let activeFilter = null;
+        const chipsRow = document.createElement('div');
+        chipsRow.className = 'filter-chips';
+        ['All', ...exercises].forEach(ex => {
+            const chip = document.createElement('div');
+            chip.className = 'chip' + (ex==='All'?' active':'');
+            chip.textContent = ex;
+            chip.addEventListener('click', () => {
+                activeFilter = ex==='All' ? null : ex;
+                chipsRow.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c===chip));
+                renderSessions();
+            });
+            chipsRow.appendChild(chip);
         });
+        container.appendChild(chipsRow);
+    
+        // ── Group sets into day buckets ──────────────────────────────────────────
+        const days = [];
+        sets.forEach(s => {
+            const key = new Date(s.timestamp).toLocaleDateString();
+            if (!days.length || days[days.length-1].key !== key) days.push({key, sets:[]});
+            days[days.length-1].sets.push(s);
+        });
+    
+        // ── Build per-exercise history for progress arrows ───────────────────────
+        // exerciseDays[name] = [{date, maxW, maxR}] ascending
+        const exerciseDays = {};
+        [...sets].reverse().forEach(s => {
+            const date = new Date(s.timestamp).toLocaleDateString();
+            if (!exerciseDays[s.exercise]) exerciseDays[s.exercise] = [];
+            const arr = exerciseDays[s.exercise];
+            if (!arr.length || arr[arr.length-1].date !== date)
+                arr.push({date, maxW:s.weight, maxR:s.reps});
+            else {
+                const last = arr[arr.length-1];
+                if (s.weight > last.maxW || (s.weight===last.maxW && s.reps>last.maxR)) { last.maxW=s.weight; last.maxR=s.reps; }
+            }
+        });
+    
+        function progressIcon(ex, date) {
+            const arr = exerciseDays[ex]; if (!arr) return '';
+            const i = arr.findIndex(h => h.date===date);
+            if (i <= 0) return '';
+            const [cur, prev] = [arr[i], arr[i-1]];
+            if (cur.maxW>prev.maxW || (cur.maxW===prev.maxW && cur.maxR>prev.maxR)) return ' <span class="pill-up">↑</span>';
+            if (cur.maxW<prev.maxW || (cur.maxW===prev.maxW && cur.maxR<prev.maxR)) return ' <span class="pill-down">↓</span>';
+            return '';
+        }
+    
+        // ── Render sessions ──────────────────────────────────────────────────────
+        const sessionsDiv = document.createElement('div');
+        container.appendChild(sessionsDiv);
+    
+        function renderSessions() {
+            sessionsDiv.innerHTML = '';
+            const visible = activeFilter
+                ? days.map(d => ({...d, sets:d.sets.filter(s => s.exercise===activeFilter)})).filter(d => d.sets.length)
+                : days;
+        
+            visible.forEach((day, i) => {
+                const byEx = {};
+                day.sets.forEach(s => { (byEx[s.exercise]||(byEx[s.exercise]=[])).push(s); });
+                const exNames = Object.keys(byEx);
+                const vol = Math.round(day.sets.reduce((a,s) => a+s.weight*s.reps, 0)).toLocaleString();
+                const label = new Date(day.sets[0].timestamp).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+        
+                const sessionCat = sessionCategory(exNames);   // ← renamed to avoid shadow
+                const card = document.createElement('div');
+                card.className = 'session-card' + (i===0?' open':'');
+                if (sessionCat) card.dataset.cat = sessionCat;
+        
+                card.innerHTML = `
+                    <div class="session-header">
+                        <div>
+                            <div style="font-weight:600">${label}</div>
+                            <div class="session-summary">${exNames.length} exercise${exNames.length!==1?'s':''} · ${vol} lbs</div>
+                        </div>
+                        <span class="session-toggle">⌄</span>
+                    </div>
+                    <div class="session-body"></div>`;
+        
+                const body = card.querySelector('.session-body');
+        
+                exNames.forEach(ex => {
+                    const exCat = getCategory(ex);              // ← renamed to avoid shadow
+                    const pills = byEx[ex].map(s =>
+                        `<span class="set-pill"${exCat?` data-cat="${exCat}"`:''}>${s.weight}lb × ${s.reps}</span>`
+                    ).join('');
+                    const g = document.createElement('div');
+                    g.className = 'exercise-group';
+                    g.innerHTML = `<div class="exercise-name${exCat?` cat-${exCat}`:''}">
+                        ${ex}${progressIcon(ex, day.key)}
+                    </div><div class="set-pills">${pills}</div>`;
+                    body.appendChild(g);
+                });
+        
+                card.querySelector('.session-header').addEventListener('click', () => card.classList.toggle('open'));
+                sessionsDiv.appendChild(card);
+            });
+        }
+        
+        renderSessions();
     }
 
     function createSetElement(set) {

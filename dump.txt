@@ -19,7 +19,7 @@
 body {
     background-color: var(--bg-color);
     color: var(--text-primary);
-    padding-bottom: 70px; /* Space for bottom nav */
+    padding-bottom: 70px;
 }
 
 header {
@@ -79,7 +79,7 @@ button {
     font-size: 1.1rem;
     font-weight: bold;
     cursor: pointer;
-    min-height: 48px; /* Large tap target */
+    min-height: 48px;
 }
 
 .btn-primary {
@@ -126,7 +126,7 @@ button {
     display: flex;
     justify-content: space-around;
     border-top: 1px solid #333;
-    padding-bottom: env(safe-area-inset-bottom); /* iOS notch support */
+    padding-bottom: env(safe-area-inset-bottom);
 }
 
 .nav-btn {
@@ -141,6 +141,7 @@ button {
 .nav-btn.active {
     color: var(--accent-color);
 }
+
 /* Stepper Layout */
 .stepper-container {
     display: flex;
@@ -181,6 +182,107 @@ input::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
+
+/* =============================================
+   CUSTOM AUTOCOMPLETE DROPDOWN
+   ============================================= */
+
+/* The input-group for exercise needs to be the
+   positioning anchor so the dropdown overlaps
+   the content below it (not push it down). */
+.autocomplete-anchor {
+    position: relative;
+    /* Ensure dropdown floats above sibling rows */
+    z-index: 20;
+}
+
+/* When open, give the input rounded-bottom: none
+   so it visually connects to the dropdown */
+.autocomplete-anchor.is-open input {
+    border-bottom-color: transparent;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.autocomplete-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: #2c2c2c;
+    border: 1px solid var(--accent-color);
+    border-top: none;
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+    z-index: 999;
+    /* Cap at ~4.5 items to hint at scrollability */
+    max-height: 234px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+}
+
+.autocomplete-anchor.is-open .autocomplete-dropdown {
+    display: block;
+}
+
+.autocomplete-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 16px;
+    min-height: 52px;           /* Comfortable iOS tap target */
+    border-bottom: 1px solid #383838;
+    cursor: pointer;
+    /* Prevent text selection on fast taps */
+    -webkit-user-select: none;
+    user-select: none;
+    /* Smooth press feedback */
+    transition: background-color 0.08s ease;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+/* touchstart highlight is handled in JS for instant feedback */
+.autocomplete-item.is-pressing {
+    background-color: #3a3a3a;
+}
+
+.autocomplete-item-name {
+    font-size: 1rem;
+    color: var(--text-primary);
+    flex: 1;
+    padding-right: 12px;
+    /* Truncate very long names */
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Highlight the matched substring */
+.autocomplete-item-name mark {
+    background: transparent;
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+.autocomplete-item-hint {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* "No results" empty state */
+.autocomplete-empty {
+    padding: 14px 16px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    text-align: center;
+}
 === icon-192.png ===
 
 === icon-512.png ===
@@ -209,10 +311,21 @@ input::-webkit-inner-spin-button {
     <main>
         <section id="view-log" class="view active">
             <form id="log-form">
-                <div class="input-group">
+                <!-- autocomplete-anchor gives the dropdown its positioning context -->
+                <div class="input-group autocomplete-anchor" id="exercise-anchor">
                     <label for="exercise">Exercise</label>
-                    <input type="text" id="exercise" list="exercise-list" required autocomplete="off" placeholder="e.g. Bench Press">
-                    <datalist id="exercise-list"></datalist>
+                    <input
+                        type="text"
+                        id="exercise"
+                        required
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="words"
+                        spellcheck="false"
+                        placeholder="e.g. Bench Press"
+                    >
+                    <!-- Custom dropdown — populated by JS -->
+                    <div id="autocomplete-dropdown" class="autocomplete-dropdown"></div>
                 </div>
                 
                 <div class="row">
@@ -319,10 +432,19 @@ const DB = {
         const exercises = [...new Set(allSets.map(s => s.exercise))];
         return exercises.sort();
     },
+
+    // Returns { exercise, weight, reps } from the most recent set of this exercise
+    async getLastSetForExercise(exerciseName) {
+        if (!exerciseName) return null;
+        return await db.sets
+            .where('exercise').equals(exerciseName)
+            .reverse()
+            .first() || null;
+    },
+
     async getRoutineFromLastTime(exerciseName) {
         if (!exerciseName) return [];
         
-        // 1. Find the most recent set of this exercise
         const lastSet = await db.sets
             .where('exercise').equals(exerciseName)
             .reverse()
@@ -330,12 +452,10 @@ const DB = {
         
         if (!lastSet) return [];
 
-        // 2. Define the start/end of that specific day
         const day = new Date(lastSet.timestamp);
         const startOfDay = new Date(day.setHours(0, 0, 0, 0)).getTime();
         const endOfDay = new Date(day.setHours(23, 59, 59, 999)).getTime();
 
-        // 3. Get all unique exercises from that window
         const setsFromThatDay = await db.sets
             .where('timestamp')
             .between(startOfDay, endOfDay)
@@ -394,33 +514,173 @@ window.step = (id, amount) => {
     const el = document.getElementById(id);
     const currentVal = parseFloat(el.value) || 0;
     const newVal = currentVal + amount;
-    // Reps should not be negative; Weight can be (for assisted exercises)
     el.value = (id === 'reps') ? Math.max(0, newVal) : newVal;
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+
     // --- ELEMENTS ---
-    const navBtns = document.querySelectorAll('.nav-btn');
-    const views = document.querySelectorAll('.view');
-    const headerTitle = document.getElementById('header-title');
-    const logForm = document.getElementById('log-form');
+    const navBtns       = document.querySelectorAll('.nav-btn');
+    const views         = document.querySelectorAll('.view');
+    const headerTitle   = document.getElementById('header-title');
+    const logForm       = document.getElementById('log-form');
     const exerciseInput = document.getElementById('exercise');
-    const exerciseList = document.getElementById('exercise-list');
-    const weightInput = document.getElementById('weight');
-    const repsInput = document.getElementById('reps');
-    const notesInput = document.getElementById('notes');
+    const exerciseAnchor= document.getElementById('exercise-anchor');
+    const dropdown      = document.getElementById('autocomplete-dropdown');
+    const weightInput   = document.getElementById('weight');
+    const repsInput     = document.getElementById('reps');
+    const notesInput    = document.getElementById('notes');
+
+    // --- STATE ---
+    // In-memory cache so every keystroke doesn't hit IndexedDB
+    let allExercises = []; // [{ name: string, lastWeight: number, lastReps: number }]
 
     // --- INITIALIZATION ---
     autoImportCSV();
-    updateAutocomplete();
+    refreshExerciseCache().then(() => {
+        // Pre-warm: show full list as soon as the field is first focused
+    });
     loadTodaySets();
 
-    // --- 1. DATA IMPORT (One-time from codebase) ---
+    // =============================================
+    // 1. EXERCISE CACHE  (rebuilt after each save)
+    // =============================================
+    async function refreshExerciseCache() {
+        const names = await DB.getUniqueExercises(); // already sorted A→Z
+        // Fetch last set for each exercise in parallel
+        allExercises = await Promise.all(
+            names.map(async name => {
+                const last = await DB.getLastSetForExercise(name);
+                return {
+                    name,
+                    lastWeight: last ? last.weight : null,
+                    lastReps:   last ? last.reps   : null,
+                };
+            })
+        );
+    }
+
+    // =============================================
+    // 2. AUTOCOMPLETE DROPDOWN
+    // =============================================
+
+    // Build a highlighted name span: wraps the matched substring in <mark>
+    function buildNameHTML(name, query) {
+        if (!query) return name;
+        const idx = name.toLowerCase().indexOf(query.toLowerCase());
+        if (idx === -1) return name;
+        return (
+            name.slice(0, idx) +
+            '<mark>' + name.slice(idx, idx + query.length) + '</mark>' +
+            name.slice(idx + query.length)
+        );
+    }
+
+    function renderDropdown(query) {
+        const q = query.trim();
+
+        // Filter: substring match (case-insensitive)
+        const matches = q
+            ? allExercises.filter(e =>
+                e.name.toLowerCase().includes(q.toLowerCase()))
+            : allExercises; // empty query → show all (on focus)
+
+        dropdown.innerHTML = '';
+
+        if (matches.length === 0) {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No matches — type to add new</div>';
+        } else {
+            matches.forEach(item => {
+                const el = document.createElement('div');
+                el.className = 'autocomplete-item';
+
+                const hint = (item.lastWeight !== null && item.lastReps !== null)
+                    ? `${item.lastWeight} × ${item.lastReps}`
+                    : '';
+
+                el.innerHTML = `
+                    <span class="autocomplete-item-name">${buildNameHTML(item.name, q)}</span>
+                    ${hint ? `<span class="autocomplete-item-hint">${hint}</span>` : ''}
+                `;
+
+                // Use touchstart for instant response on iOS (no 300ms delay)
+                el.addEventListener('touchstart', () => {
+                    el.classList.add('is-pressing');
+                }, { passive: true });
+
+                el.addEventListener('touchend', (e) => {
+                    e.preventDefault(); // prevent ghost click
+                    selectExercise(item);
+                });
+
+                // Fallback for non-touch (dev/desktop)
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault(); // keep focus on input
+                    selectExercise(item);
+                });
+
+                dropdown.appendChild(el);
+            });
+        }
+
+        openDropdown();
+    }
+
+    function openDropdown() {
+        exerciseAnchor.classList.add('is-open');
+    }
+
+    function closeDropdown() {
+        exerciseAnchor.classList.remove('is-open');
+        // Clean up press states
+        dropdown.querySelectorAll('.is-pressing').forEach(el =>
+            el.classList.remove('is-pressing'));
+    }
+
+    function selectExercise(item) {
+        exerciseInput.value = item.name;
+
+        // Auto-fill weight & reps from the last time this exercise was logged
+        if (item.lastWeight !== null) weightInput.value = item.lastWeight;
+        if (item.lastReps   !== null) repsInput.value   = item.lastReps;
+
+        closeDropdown();
+
+        // Move focus to notes so the keyboard doesn't re-open on weight/reps
+        // (user just got their values pre-filled — they can adjust with steppers)
+        notesInput.focus();
+    }
+
+    // Open on focus (show full list)
+    exerciseInput.addEventListener('focus', () => {
+        renderDropdown(exerciseInput.value);
+    });
+
+    // Filter as user types
+    exerciseInput.addEventListener('input', () => {
+        renderDropdown(exerciseInput.value);
+    });
+
+    // Close when user taps outside the anchor
+    document.addEventListener('touchstart', (e) => {
+        if (!exerciseAnchor.contains(e.target)) {
+            closeDropdown();
+        }
+    }, { passive: true });
+
+    // Keyboard: close on Escape
+    exerciseInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeDropdown();
+    });
+
+    // =============================================
+    // 3. DATA IMPORT (One-time from codebase)
+    // =============================================
     async function autoImportCSV() {
         if (localStorage.getItem('sample_data_imported')) return;
         try {
             const response = await fetch('./data.csv');
-            if (!response.ok) return; 
+            if (!response.ok) return;
             const csvText = await response.text();
             const lines = csvText.split('\n');
             const currentYear = new Date().getFullYear();
@@ -439,66 +699,57 @@ document.addEventListener('DOMContentLoaded', () => {
                         exercise: exercise.trim(),
                         reps: parseInt(reps),
                         weight: parseFloat(weight),
-                        timestamp: timestamp,
+                        timestamp,
                         notes: "Imported from CSV"
                     });
                 }
             }
             localStorage.setItem('sample_data_imported', 'true');
+            await refreshExerciseCache();
             loadTodaySets();
-            updateAutocomplete();
-        } catch (err) { 
-            console.error("Auto-import failed:", err); 
+        } catch (err) {
+            console.error("Auto-import failed:", err);
         }
     }
 
-    // --- 2. LOGIC: Routine Suggestion & Search ---
-    exerciseInput.addEventListener('change', async () => {
-        const val = exerciseInput.value.trim();
-        if (!val) return;
-        
-        // Lookup routine from the last time this exercise was performed
-        const routine = await DB.getRoutineFromLastTime(val);
-        if (routine.length > 0) {
-            console.log("Suggested exercises from your last session:", routine);
-            // Feature hint: you could display these as clickable 'chips' here
-        }
-    });
-
-    // --- 3. FORM SUBMISSION (Persistence Logic) ---
+    // =============================================
+    // 4. FORM SUBMISSION
+    // =============================================
     logForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+        closeDropdown();
+
         const set = {
             exercise: exerciseInput.value.trim(),
-            weight: parseFloat(weightInput.value) || 0,
-            reps: parseInt(repsInput.value) || 0,
-            notes: notesInput.value.trim()
+            weight:   parseFloat(weightInput.value) || 0,
+            reps:     parseInt(repsInput.value)     || 0,
+            notes:    notesInput.value.trim()
         };
 
         await DB.addSet(set);
 
-        // PERSISTENCE: 
-        // We do NOT call logForm.reset(). 
-        // We only clear the notes so the user can quickly log the next set.
-        notesInput.value = ''; 
+        // Only clear notes; keep exercise/weight/reps for quick re-logging
+        notesInput.value = '';
 
-        // Success Feedback Animation
+        // Rebuild cache so the new exercise (if novel) appears immediately
+        await refreshExerciseCache();
+
+        // Success feedback
         const btn = logForm.querySelector('.btn-primary');
         const originalText = btn.textContent;
         btn.textContent = "Saved!";
         btn.style.backgroundColor = "#28a745";
-        
         setTimeout(() => {
             btn.textContent = originalText;
             btn.style.backgroundColor = "";
         }, 800);
 
-        updateAutocomplete();
         loadTodaySets();
     });
 
-    // --- 4. UI RENDERING ---
+    // =============================================
+    // 5. UI RENDERING
+    // =============================================
     async function loadTodaySets() {
         const sets = await DB.getTodaySets();
         const list = document.getElementById('today-list');
@@ -540,7 +791,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         li.className = 'set-item';
         const time = new Date(set.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        
+
         li.innerHTML = `
             <div class="set-details">
                 <h3>${set.exercise}</h3>
@@ -561,19 +812,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return li;
     }
 
-    async function updateAutocomplete() {
-        const exercises = await DB.getUniqueExercises();
-        exerciseList.innerHTML = '';
-        exercises.forEach(ex => {
-            const option = document.createElement('option');
-            option.value = ex;
-            exerciseList.appendChild(option);
-        });
-    }
-
-    // --- 5. NAVIGATION ---
+    // =============================================
+    // 6. NAVIGATION
+    // =============================================
     navBtns.forEach(btn => {
         btn.addEventListener('click', () => {
+            closeDropdown();
             navBtns.forEach(b => b.classList.remove('active'));
             views.forEach(v => v.classList.add('hidden'));
 
