@@ -283,9 +283,15 @@ input::-webkit-inner-spin-button {
     text-align: center;
 }
 /* ── History v2 ── */
+/* ── Heatmap v2 ── */
 .heatmap { display:flex; flex-wrap:wrap; gap:3px; padding:12px; background:var(--surface-color); border-radius:var(--border-radius); margin-bottom:12px; }
-.heat-cell { width:14px; height:14px; border-radius:2px; background:#2c2c2c; flex-shrink:0; }
-.heat-1{background:#0d4a1f}.heat-2{background:#1a7a35}.heat-3{background:#28a745}
+.heat-cell { width:14px; height:14px; border-radius:2px; background:#2c2c2c; flex-shrink:0; cursor:pointer; transition:opacity 0.15s; }
+.heat-cell:active { opacity: 0.6; }
+.heat-cell.selected { outline: 2px solid #fff; outline-offset: 1px; }
+.heat-push  { background: #c0392b; }
+.heat-pull  { background: #2471a3; }
+.heat-legs  { background: #1e8449; }
+.heat-mixed { background: #666; }
 
 .filter-chips { display:flex; overflow-x:auto; gap:8px; margin-bottom:12px; scrollbar-width:none; }
 .filter-chips::-webkit-scrollbar { display:none; }
@@ -318,3 +324,20 @@ input::-webkit-inner-spin-button {
 .set-pill[data-cat="push"]  { border-left: 2px solid #ff6b6b44; }
 .set-pill[data-cat="pull"]  { border-left: 2px solid #4dabf744; }
 .set-pill[data-cat="legs"]  { border-left: 2px solid #69db7c44; }
+
+/* ── Rest Timer ── */
+.rest-timer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+    background: var(--surface-color);
+    border-radius: var(--border-radius);
+    border-left: 3px solid var(--accent-color);
+}
+.timer-label { color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.timer-display { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; }
+/* Turns red as rest gets long */
+.rest-timer.warn .timer-display { color: var(--danger-color); }

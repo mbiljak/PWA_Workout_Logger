@@ -31,6 +31,42 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     loadTodaySets();
 
+    // ── Rest Timer ───────────────────────────────────────────────────────────────
+    const restTimer   = document.getElementById('rest-timer');
+    const timerDisplay = restTimer.querySelector('.timer-display');
+    let   timerInterval = null;
+    const MAX_REST_MS   = 6 * 60 * 1000; // 6 minutes
+    const WARN_MS       = 4 * 60 * 1000; // go red at 4 min
+
+    function startTimer(fromTimestamp) {
+        clearInterval(timerInterval);
+        function tick() {
+            const elapsed = Date.now() - fromTimestamp; // always wall-clock, survives sleep
+            if (elapsed >= MAX_REST_MS) {
+                restTimer.classList.add('hidden');
+                clearInterval(timerInterval);
+                return;
+            }
+            const secs  = Math.floor(elapsed / 1000);
+            const m     = String(Math.floor(secs / 60)).padStart(2, '0');
+            const s     = String(secs % 60).padStart(2, '0');
+            timerDisplay.textContent = `${m}:${s}`;
+            restTimer.classList.toggle('warn', elapsed >= WARN_MS);
+            restTimer.classList.remove('hidden');
+        }
+        tick();
+        timerInterval = setInterval(tick, 1000);
+    }
+
+    // On load: resume timer if last set was within the window
+    async function initTimer() {
+        const sets = await DB.getTodaySets(); // newest-first
+        if (sets.length && (Date.now() - sets[0].timestamp) < MAX_REST_MS)
+            startTimer(sets[0].timestamp);
+    }
+    initTimer();
+    // ─────────────────────────────────────────────────────────────────────────────
+
     // =============================================
     // 1. EXERCISE CACHE  (rebuilt after each save)
     // =============================================
@@ -216,6 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         await DB.addSet(set);
+        startTimer(Date.now()); // ← must be inside DOMContentLoaded, after addSet
 
         // Only clear notes; keep exercise/weight/reps for quick re-logging
         notesInput.value = '';
@@ -247,22 +284,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadHistory() {
-        const sets = await DB.getAllSets(); // newest-first
+        const sets = await DB.getAllSets();
         const container = document.getElementById('history-container');
         container.innerHTML = '';
         if (!sets.length) { container.innerHTML = '<p style="padding:20px;">No workout history found.</p>'; return; }
     
+        // ── Build per-day metadata ───────────────────────────────────────────────
+        // keyed by toLocaleDateString() to match the days[] structure below
+        const dayMeta = {}; // { dateKey: { exercises: Set } }
+        sets.forEach(s => {
+            const k = new Date(s.timestamp).toLocaleDateString();
+            if (!dayMeta[k]) dayMeta[k] = { exercises: new Set() };
+            dayMeta[k].exercises.add(s.exercise);
+        });
+    
         // ── Heatmap (last 84 days) ───────────────────────────────────────────────
-        const countByDate = {};
-        sets.forEach(s => { const k = new Date(s.timestamp).toDateString(); countByDate[k] = (countByDate[k]||0)+1; });
+        let activeDateFilter = null;
         const heatmap = document.createElement('div');
         heatmap.className = 'heatmap';
+    
         for (let i = 83; i >= 0; i--) {
             const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
-            const n = countByDate[d.toDateString()]||0;
-            const c = document.createElement('div');
-            c.className = `heat-cell${n>8?' heat-3':n>3?' heat-2':n>0?' heat-1':''}`;
-            heatmap.appendChild(c);
+            const dateKey = d.toLocaleDateString();
+            const meta    = dayMeta[dateKey];
+            const cell    = document.createElement('div');
+    
+            if (meta) {
+                const cat = sessionCategory([...meta.exercises]);
+                cell.className = `heat-cell heat-${cat||'mixed'}`;
+                cell.addEventListener('click', () => {
+                    const isSame = activeDateFilter === dateKey;
+                    activeDateFilter = isSame ? null : dateKey;
+                    heatmap.querySelectorAll('.heat-cell').forEach(c => c.classList.remove('selected'));
+                    if (!isSame) cell.classList.add('selected');
+                    renderSessions();
+                });
+            } else {
+                cell.className = 'heat-cell'; // rest day — no interaction
+            }
+            heatmap.appendChild(cell);
         }
         container.appendChild(heatmap);
     
@@ -292,8 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
             days[days.length-1].sets.push(s);
         });
     
-        // ── Build per-exercise history for progress arrows ───────────────────────
-        // exerciseDays[name] = [{date, maxW, maxR}] ascending
+        // ── Per-exercise history for progress arrows ─────────────────────────────
         const exerciseDays = {};
         [...sets].reverse().forEach(s => {
             const date = new Date(s.timestamp).toLocaleDateString();
@@ -303,56 +362,54 @@ document.addEventListener('DOMContentLoaded', () => {
                 arr.push({date, maxW:s.weight, maxR:s.reps});
             else {
                 const last = arr[arr.length-1];
-                if (s.weight > last.maxW || (s.weight===last.maxW && s.reps>last.maxR)) { last.maxW=s.weight; last.maxR=s.reps; }
+                if (s.weight>last.maxW||(s.weight===last.maxW&&s.reps>last.maxR)){last.maxW=s.weight;last.maxR=s.reps;}
             }
         });
     
         function progressIcon(ex, date) {
             const arr = exerciseDays[ex]; if (!arr) return '';
             const i = arr.findIndex(h => h.date===date);
-            if (i <= 0) return '';
-            const [cur, prev] = [arr[i], arr[i-1]];
-            if (cur.maxW>prev.maxW || (cur.maxW===prev.maxW && cur.maxR>prev.maxR)) return ' <span class="pill-up">↑</span>';
-            if (cur.maxW<prev.maxW || (cur.maxW===prev.maxW && cur.maxR<prev.maxR)) return ' <span class="pill-down">↓</span>';
+            if (i<=0) return '';
+            const [cur,prev] = [arr[i],arr[i-1]];
+            if (cur.maxW>prev.maxW||(cur.maxW===prev.maxW&&cur.maxR>prev.maxR)) return ' <span class="pill-up">↑</span>';
+            if (cur.maxW<prev.maxW||(cur.maxW===prev.maxW&&cur.maxR<prev.maxR)) return ' <span class="pill-down">↓</span>';
             return '';
         }
     
-        // ── Render sessions ──────────────────────────────────────────────────────
+        // ── Sessions ─────────────────────────────────────────────────────────────
         const sessionsDiv = document.createElement('div');
         container.appendChild(sessionsDiv);
     
         function renderSessions() {
             sessionsDiv.innerHTML = '';
-            const visible = activeFilter
-                ? days.map(d => ({...d, sets:d.sets.filter(s => s.exercise===activeFilter)})).filter(d => d.sets.length)
+            let visible = activeDateFilter
+                ? days.filter(d => d.key === activeDateFilter)
                 : days;
-        
+            if (activeFilter)
+                visible = visible.map(d => ({...d, sets:d.sets.filter(s => s.exercise===activeFilter)})).filter(d => d.sets.length);
+    
             visible.forEach((day, i) => {
                 const byEx = {};
                 day.sets.forEach(s => { (byEx[s.exercise]||(byEx[s.exercise]=[])).push(s); });
                 const exNames = Object.keys(byEx);
                 const vol = Math.round(day.sets.reduce((a,s) => a+s.weight*s.reps, 0)).toLocaleString();
                 const label = new Date(day.sets[0].timestamp).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-        
-                const sessionCat = sessionCategory(exNames);   // ← renamed to avoid shadow
+                const sessionCat = sessionCategory(exNames);
+    
                 const card = document.createElement('div');
                 card.className = 'session-card' + (i===0?' open':'');
                 if (sessionCat) card.dataset.cat = sessionCat;
-        
                 card.innerHTML = `
                     <div class="session-header">
-                        <div>
-                            <div style="font-weight:600">${label}</div>
-                            <div class="session-summary">${exNames.length} exercise${exNames.length!==1?'s':''} · ${vol} lbs</div>
-                        </div>
+                        <div><div style="font-weight:600">${label}</div>
+                        <div class="session-summary">${exNames.length} exercise${exNames.length!==1?'s':''} · ${vol} lbs</div></div>
                         <span class="session-toggle">⌄</span>
                     </div>
                     <div class="session-body"></div>`;
-        
+    
                 const body = card.querySelector('.session-body');
-        
                 exNames.forEach(ex => {
-                    const exCat = getCategory(ex);              // ← renamed to avoid shadow
+                    const exCat = getCategory(ex);
                     const pills = byEx[ex].map(s =>
                         `<span class="set-pill"${exCat?` data-cat="${exCat}"`:''}>${s.weight}lb × ${s.reps}</span>`
                     ).join('');
@@ -363,12 +420,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div><div class="set-pills">${pills}</div>`;
                     body.appendChild(g);
                 });
-        
+    
                 card.querySelector('.session-header').addEventListener('click', () => card.classList.toggle('open'));
                 sessionsDiv.appendChild(card);
             });
+    
+            if (!visible.length)
+                sessionsDiv.innerHTML = '<p style="padding:20px;color:var(--text-secondary)">No sessions for this day.</p>';
         }
-        
+    
         renderSessions();
     }
 
