@@ -125,17 +125,17 @@ button {
     display: flex;
     justify-content: space-around;
     border-top: 1px solid #333;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: env(safe-area-inset-bottom); /* respects iPhone home bar */
 }
 
 .nav-btn {
     background: none;
     color: var(--text-secondary);
-    padding: 16px;
+    padding: 18px 16px;    /* was 16px, taller tap target */
     flex: 1;
     font-size: 1rem;
     border-radius: 0;
-    min-height: 60px;
+    min-height: 70px;      /* was 60px */
 }
 .nav-btn.active {
     color: var(--accent-color);

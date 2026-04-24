@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- ELEMENTS ---
     const navBtns       = document.querySelectorAll('.nav-btn');
     const views         = document.querySelectorAll('.view');
-    const headerTitle   = document.getElementById('header-title');
     const logForm       = document.getElementById('log-form');
     const exerciseInput = document.getElementById('exercise');
     const exerciseAnchor= document.getElementById('exercise-anchor');
@@ -468,7 +467,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             btn.classList.add('active');
             document.getElementById(btn.dataset.target).classList.remove('hidden');
-            headerTitle.textContent = btn.dataset.title;
 
             if (btn.dataset.target === 'view-history') loadHistory();
         });
