@@ -215,11 +215,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const [timeStr, exercise, reps, weight] = line.split(',');
                 if (!timeStr || !exercise) continue;
 
-                const dateClean = timeStr.replace('-', ' ');
+                const dateClean = timeStr.trim().replace(/-/g, ' ');
                 const timestamp = Date.parse(`${dateClean} ${currentYear}`);
 
                 if (!isNaN(timestamp)) {
-                    await DB.addSet({
+                    await DB.importSet({
                         exercise: exercise.trim(),
                         reps: parseInt(reps),
                         weight: parseFloat(weight),
