@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Workout Logger</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#121212">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+</head>
+<body>
+    <header>
+        <h1 id="header-title">Log Workout</h1>
+    </header>
+
+    <main>
+        <section id="view-log" class="view active">
+            <form id="log-form">
+                <!-- autocomplete-anchor gives the dropdown its positioning context -->
+                <div class="input-group autocomplete-anchor" id="exercise-anchor">
+                    <label for="exercise">Exercise</label>
+                    <input
+                        type="text"
+                        id="exercise"
+                        required
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="words"
+                        spellcheck="false"
+                        placeholder="e.g. Bench Press"
+                    >
+                    <!-- Custom dropdown — populated by JS -->
+                    <div id="autocomplete-dropdown" class="autocomplete-dropdown"></div>
+                </div>
+                
+                <div class="row">
+                    <div class="input-group">
+                        <label>Weight (lbs)</label>
+                        <div class="stepper-container">
+                            <button type="button" class="stepper-btn" onclick="step('weight', -2.5)">-</button>
+                            <input type="number" id="weight" step="0.5" required placeholder="0">
+                            <button type="button" class="stepper-btn" onclick="step('weight', 2.5)">+</button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>Reps</label>
+                        <div class="stepper-container">
+                            <button type="button" class="stepper-btn" onclick="step('reps', -1)">-</button>
+                            <input type="number" id="reps" required placeholder="0">
+                            <button type="button" class="stepper-btn" onclick="step('reps', 1)">+</button>
+                        </div>
+                    </div>
+                </div>
+            
+                <div class="input-group">
+                    <label for="notes">Notes (optional)</label>
+                    <input type="text" id="notes" autocomplete="off" placeholder="Felt heavy...">
+                </div>
+                <button type="submit" class="btn-primary">Log Set</button>
+            </form>
+
+            <div class="today-container">
+                <h2>Today's Sets</h2>
+                <ul id="today-list" class="set-list"></ul>
+            </div>
+        </section>
+
+        <section id="view-history" class="view hidden">
+            <div id="history-container"></div>
+        </section>
+
+        <section id="view-backup" class="view hidden">
+            <div class="backup-container">
+                <h2>Export Data</h2>
+                <p>Save your workout history locally.</p>
+                <button id="btn-export-json" class="btn-secondary">Export JSON</button>
+                <button id="btn-export-csv" class="btn-secondary">Export CSV</button>
+            </div>
+        </section>
+    </main>
+
+    <nav class="bottom-nav">
+        <button class="nav-btn active" data-target="view-log" data-title="Log Workout">Log</button>
+        <button class="nav-btn" data-target="view-history" data-title="Workout History">History</button>
+        <button class="nav-btn" data-target="view-backup" data-title="Backup & Export">Backup</button>
+    </nav>
+
+    <script src="js/db.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/export.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js')
+                .then(reg => console.log('SW registered!', reg))
+                .catch(err => console.error('SW sync failed!', err));
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,284 @@
+:root {
+    --bg-color: #121212;
+    --surface-color: #1e1e1e;
+    --text-primary: #ffffff;
+    --text-secondary: #aaaaaa;
+    --accent-color: #007bff;
+    --danger-color: #ff4444;
+    --border-radius: 8px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    padding-bottom: 70px;
+}
+
+header {
+    background-color: var(--surface-color);
+    padding: 16px;
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid #333;
+}
+
+main {
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.hidden { display: none !important; }
+
+/* Forms */
+form {
+    background-color: var(--surface-color);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 24px;
+}
+
+.input-group { margin-bottom: 12px; }
+.row { display: flex; gap: 12px; }
+.row .input-group { flex: 1; }
+
+label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #333;
+    background-color: #2c2c2c;
+    color: var(--text-primary);
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    outline: none;
+}
+input:focus { border-color: var(--accent-color); }
+
+button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 1.1rem;
+    font-weight: bold;
+    cursor: pointer;
+    min-height: 48px;
+}
+
+.btn-primary {
+    background-color: var(--accent-color);
+    color: white;
+}
+.btn-secondary {
+    background-color: #333;
+    color: white;
+    margin-bottom: 12px;
+}
+
+/* Lists */
+.set-list { list-style: none; }
+.set-item {
+    background-color: var(--surface-color);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.set-item:active { opacity: 0.7; }
+.set-details h3 { font-size: 1.1rem; margin-bottom: 4px; }
+.set-details p { color: var(--text-secondary); font-size: 0.9rem; }
+.set-time { color: var(--text-secondary); font-size: 0.8rem; }
+
+.history-date {
+    margin: 20px 0 10px 0;
+    color: var(--accent-color);
+    font-size: 1.2rem;
+    border-bottom: 1px solid #333;
+    padding-bottom: 4px;
+}
+
+/* Bottom Nav */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--surface-color);
+    display: flex;
+    justify-content: space-around;
+    border-top: 1px solid #333;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.nav-btn {
+    background: none;
+    color: var(--text-secondary);
+    padding: 16px;
+    flex: 1;
+    font-size: 1rem;
+    border-radius: 0;
+    min-height: 60px;
+}
+.nav-btn.active {
+    color: var(--accent-color);
+}
+
+/* Stepper Layout */
+.stepper-container {
+    display: flex;
+    align-items: center;
+    background-color: #2c2c2c;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.stepper-btn {
+    background-color: #3d3d3d;
+    color: white;
+    font-size: 1.5rem;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.stepper-btn:active { background-color: var(--accent-color); }
+
+.stepper-container input {
+    border: none;
+    border-radius: 0;
+    text-align: center;
+    flex: 1;
+    font-size: 1.2rem;
+    background: transparent;
+}
+
+/* Chrome/Safari/Edge: Remove arrows from number inputs */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* =============================================
+   CUSTOM AUTOCOMPLETE DROPDOWN
+   ============================================= */
+
+/* The input-group for exercise needs to be the
+   positioning anchor so the dropdown overlaps
+   the content below it (not push it down). */
+.autocomplete-anchor {
+    position: relative;
+    /* Ensure dropdown floats above sibling rows */
+    z-index: 20;
+}
+
+/* When open, give the input rounded-bottom: none
+   so it visually connects to the dropdown */
+.autocomplete-anchor.is-open input {
+    border-bottom-color: transparent;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.autocomplete-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: #2c2c2c;
+    border: 1px solid var(--accent-color);
+    border-top: none;
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+    z-index: 999;
+    /* Cap at ~4.5 items to hint at scrollability */
+    max-height: 234px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+}
+
+.autocomplete-anchor.is-open .autocomplete-dropdown {
+    display: block;
+}
+
+.autocomplete-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 16px;
+    min-height: 52px;           /* Comfortable iOS tap target */
+    border-bottom: 1px solid #383838;
+    cursor: pointer;
+    /* Prevent text selection on fast taps */
+    -webkit-user-select: none;
+    user-select: none;
+    /* Smooth press feedback */
+    transition: background-color 0.08s ease;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+/* touchstart highlight is handled in JS for instant feedback */
+.autocomplete-item.is-pressing {
+    background-color: #3a3a3a;
+}
+
+.autocomplete-item-name {
+    font-size: 1rem;
+    color: var(--text-primary);
+    flex: 1;
+    padding-right: 12px;
+    /* Truncate very long names */
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Highlight the matched substring */
+.autocomplete-item-name mark {
+    background: transparent;
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+.autocomplete-item-hint {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* "No results" empty state */
+.autocomplete-empty {
+    padding: 14px 16px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    text-align: center;
+}
