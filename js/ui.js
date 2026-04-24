@@ -208,31 +208,43 @@ document.addEventListener('DOMContentLoaded', () => {
             const csvText = await response.text();
             const lines = csvText.split('\n');
             const currentYear = new Date().getFullYear();
-
+            const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
-                const [timeStr, exercise, reps, weight] = line.split(',');
+    
+                const cols     = line.split(',');
+                const timeStr  = cols[0]?.trim();   // "Feb-08 13:53"
+                const exercise = cols[1]?.trim();
+                const reps     = parseInt(cols[2]);
+                const weight   = parseFloat(cols[3]);
                 if (!timeStr || !exercise) continue;
-
-                const dateClean = timeStr.trim().replace(/-/g, ' ');
-                const timestamp = Date.parse(`${dateClean} ${currentYear}`);
-
-                if (!isNaN(timestamp)) {
-                    await DB.importSet({
-                        exercise: exercise.trim(),
-                        reps: parseInt(reps),
-                        weight: parseFloat(weight),
-                        timestamp,
-                        notes: "Imported from CSV"
-                    });
-                }
+    
+                // Split "Feb-08 13:53" into date and time parts
+                const [datePart, timePart = '00:00'] = timeStr.split(' ');
+                const [monthStr, dayStr]  = datePart.split('-');
+                const [hours, minutes]    = timePart.split(':').map(Number);
+                const monthIdx = MONTHS[monthStr.toLowerCase().slice(0, 3)];
+                const day      = parseInt(dayStr);
+    
+                if (monthIdx === undefined || isNaN(day)) continue;
+    
+                const timestamp = new Date(currentYear, monthIdx, day, hours, minutes).getTime();
+    
+                await DB.importSet({
+                    exercise,
+                    reps:   isNaN(reps)   ? 0 : reps,
+                    weight: isNaN(weight) ? 0 : weight,
+                    notes:  'Imported from CSV',
+                    timestamp,
+                });
             }
             localStorage.setItem('sample_data_imported', 'true');
             await refreshExerciseCache();
             loadTodaySets();
         } catch (err) {
-            console.error("Auto-import failed:", err);
+            console.error('Auto-import failed:', err);
         }
     }
 
