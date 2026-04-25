@@ -341,3 +341,51 @@ input::-webkit-inner-spin-button {
 .timer-display { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; }
 /* Turns red as rest gets long */
 .rest-timer.warn .timer-display { color: var(--danger-color); }
+
+/* ── Analysis ── */
+.analysis-container { padding-top: 8px; }
+
+.analysis-select {
+    width: 100%;
+    padding: 12px;
+    background: #2c2c2c;
+    color: var(--text-primary);
+    border: 1px solid #333;
+    border-radius: var(--border-radius);
+    font-size: 1rem;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aaa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+}
+.analysis-select:focus { border-color: var(--accent-color); }
+
+.pr-card {
+    background: var(--surface-color);
+    border-radius: var(--border-radius);
+    padding: 14px 16px;
+    margin: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-left: 3px solid gold;
+}
+.pr-label  { font-size: 0.75rem; color: gold; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.pr-set    { font-size: 1.4rem; font-weight: 700; }
+.pr-e1rm   { font-size: 0.85rem; color: var(--text-secondary); }
+
+.chart-wrap {
+    background: var(--surface-color);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    height: 300px;
+    position: relative;
+}
+
+.analysis-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-secondary);
+}

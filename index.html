@@ -15,6 +15,7 @@
     
     <link rel="stylesheet" href="css/style.css">
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <main>
@@ -86,11 +87,26 @@
                 <button id="btn-export-csv" class="btn-secondary">Export CSV</button>
             </div>
         </section>
+        <section id="view-analysis" class="view hidden">
+            <div class="analysis-container">
+                <div class="input-group">
+                    <label for="analysis-exercise">Exercise</label>
+                    <select id="analysis-exercise" class="analysis-select">
+                        <option value="">Select an exercise…</option>
+                    </select>
+                </div>
+                <div id="analysis-pr" class="pr-card hidden"></div>
+                <div class="chart-wrap">
+                    <canvas id="analysis-chart"></canvas>
+                </div>
+            </div>
+        </section>
     </main>
 
     <nav class="bottom-nav">
         <button class="nav-btn active" data-target="view-log" data-title="Log Workout">Log</button>
         <button class="nav-btn" data-target="view-history" data-title="Workout History">History</button>
+        <button class="nav-btn" data-target="view-analysis">Analysis</button>        
         <button class="nav-btn" data-target="view-backup" data-title="Backup & Export">Backup</button>
     </nav>
     <script src="js/exercises.js"></script>

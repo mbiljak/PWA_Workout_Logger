@@ -467,6 +467,147 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         return li;
     }
+        // ── ANALYSIS TAB ─────────────────────────────────────────────────────────────
+    let analysisChart = null;
+
+    function e1rm(weight, reps) {
+        return weight * (1 + reps / 30); // Epley formula
+    }
+
+    async function loadAnalysis() {
+        const select = document.getElementById('analysis-exercise');
+        const prev   = select.value;
+        const names  = await DB.getUniqueExercises();
+        select.innerHTML = '<option value="">Select an exercise…</option>';
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            if (name === prev) opt.selected = true;
+            select.appendChild(opt);
+        });
+        if (prev) renderAnalysis(prev);
+    }
+
+    async function renderAnalysis(exerciseName) {
+        const prCard = document.getElementById('analysis-pr');
+        const canvas  = document.getElementById('analysis-chart');
+        if (!exerciseName) {
+            prCard.className = 'pr-card hidden';
+            if (analysisChart) { analysisChart.destroy(); analysisChart = null; }
+            return;
+        }
+
+        const all  = await DB.getAllSets();
+        const sets = all.filter(s => s.exercise === exerciseName);
+        if (!sets.length) return;
+
+        // Group into sessions by calendar day
+        const sessionMap = {};
+        sets.forEach(s => {
+            const key = new Date(s.timestamp).toLocaleDateString();
+            if (!sessionMap[key]) sessionMap[key] = { timestamp: s.timestamp, sets: [] };
+            sessionMap[key].sets.push(s);
+        });
+
+        const sessions = Object.entries(sessionMap)
+            .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+        const labels   = sessions.map(([, s]) =>
+            new Date(s.timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric' }));
+
+        const avgE1rms = sessions.map(([, s]) => {
+            const vals = s.sets.map(x => e1rm(x.weight, x.reps));
+            return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+        });
+
+        const volumes  = sessions.map(([, s]) =>
+            Math.round(s.sets.reduce((a, x) => a + x.weight * x.reps, 0)));
+
+        // PR = single set with highest e1RM
+        const prSet  = sets.reduce((best, s) => e1rm(s.weight, s.reps) > e1rm(best.weight, best.reps) ? s : best);
+        const prVal  = Math.round(e1rm(prSet.weight, prSet.reps));
+        const prDate = new Date(prSet.timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+
+        prCard.className = 'pr-card';
+        prCard.innerHTML = `
+            <span class="pr-label">🏆 PR Set</span>
+            <span class="pr-set">${prSet.weight} lbs × ${prSet.reps} reps</span>
+            <span class="pr-e1rm">e1RM: ${prVal} lbs · ${prDate}</span>`;
+
+        const cat      = getCategory(exerciseName);
+        const accent   = cat==='push' ? '#ff6b6b' : cat==='pull' ? '#4dabf7' : cat==='legs' ? '#69db7c' : '#007bff';
+
+        if (analysisChart) { analysisChart.destroy(); }
+
+        analysisChart = new Chart(canvas, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'Avg e1RM (lbs)',
+                        data: avgE1rms,
+                        borderColor: accent,
+                        backgroundColor: accent + '22',
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 4,
+                        pointBackgroundColor: accent,
+                        yAxisID: 'y',
+                        order: 1,
+                    },
+                    {
+                        type: 'bar',
+                        label: 'Volume (lbs)',
+                        data: volumes,
+                        backgroundColor: '#ffffff12',
+                        borderColor: '#ffffff25',
+                        borderWidth: 1,
+                        yAxisID: 'y2',
+                        order: 2,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } },
+                    tooltip: {
+                        backgroundColor: '#1e1e1e',
+                        titleColor: '#fff',
+                        bodyColor: '#aaa',
+                        borderColor: '#333',
+                        borderWidth: 1,
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#aaa', maxRotation: 45, font: { size: 10 } },
+                        grid:  { color: '#2a2a2a' }
+                    },
+                    y: {
+                        position: 'left',
+                        title: { display: true, text: 'e1RM (lbs)', color: '#aaa', font: { size: 10 } },
+                        ticks: { color: accent, font: { size: 10 } },
+                        grid:  { color: '#2a2a2a' }
+                    },
+                    y2: {
+                        position: 'right',
+                        title: { display: true, text: 'Volume (lbs)', color: '#aaa', font: { size: 10 } },
+                        ticks: { color: '#555', font: { size: 10 } },
+                        grid:  { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    }
+
+    document.getElementById('analysis-exercise')
+        .addEventListener('change', e => renderAnalysis(e.target.value));
+    // ─────────────────────────────────────────────────────────────────────────────
 
     // =============================================
     // 6. NAVIGATION
@@ -481,6 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById(btn.dataset.target).classList.remove('hidden');
 
             if (btn.dataset.target === 'view-history') loadHistory();
+            if (btn.dataset.target === 'view-analysis') loadAnalysis(); 
         });
     });
 });
