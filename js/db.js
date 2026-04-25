@@ -6,6 +6,12 @@ db.version(1).stores({
 });
 
 const DB = {
+    async addSet(set) {
+        return await db.sets.add({
+            ...set,
+            timestamp: Date.now()
+        });
+    },
     async importSet(set) {
         return await db.sets.add(set);
     },
