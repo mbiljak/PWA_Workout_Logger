@@ -8,6 +8,9 @@ const ASSETS = [
     './js/export.js',
     './data.csv',
     './manifest.json',
+    './icon-192.png', 
+    './icon-512.png', 
+    './favicon.ico',  
     'https://unpkg.com/dexie/dist/dexie.js'
 ];
 
