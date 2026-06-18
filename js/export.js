@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sets = await DB.getAllSets();
         if (sets.length === 0) return alert("No data to export.");
 
-        const headers = ['id', 'timestamp', 'date', 'exercise', 'weight', 'reps', 'notes'];
+        const headers = ['id', 'timestamp', 'date', 'exercise', 'weight', 'reps', 'duration', 'bandLevel', 'notes'];
         const csvRows = [headers.join(',')];
 
         sets.forEach(set => {
@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 `"${set.exercise.replace(/"/g, '""')}"`,
                 set.weight,
                 set.reps,
+                set.duration ?? '',
+                set.bandLevel ?? '',
                 `"${(set.notes || '').replace(/"/g, '""')}"`
             ];
             csvRows.push(row.join(','));

@@ -3,7 +3,7 @@ window.step = (id, amount) => {
     const el = document.getElementById(id);
     const currentVal = parseFloat(el.value) || 0;
     const newVal = currentVal + amount;
-    el.value = (id === 'reps') ? Math.max(0, newVal) : newVal;
+    el.value = (id === 'reps' || id === 'duration') ? Math.max(0, newVal) : newVal;
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -17,18 +17,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const dropdown      = document.getElementById('autocomplete-dropdown');
     const weightInput   = document.getElementById('weight');
     const repsInput     = document.getElementById('reps');
+    const durationInput = document.getElementById('duration');
     const notesInput    = document.getElementById('notes');
+
+    const groupWeight   = document.getElementById('group-weight');
+    const groupReps     = document.getElementById('group-reps');
+    const groupDuration = document.getElementById('group-duration');
+    const groupBand     = document.getElementById('group-band');
+    const weightLabel   = document.getElementById('weight-label');
+    const bandSegmented = document.getElementById('band-segmented');
 
     // --- STATE ---
     // In-memory cache so every keystroke doesn't hit IndexedDB
-    let allExercises = []; // [{ name: string, lastWeight: number, lastReps: number }]
+    let allExercises = []; // [{ name, lastWeight, lastReps, def }]
+    let currentTracking = 'weighted'; // tracking type of the currently-selected exercise
 
     // --- INITIALIZATION ---
-    autoImportCSV();
-    refreshExerciseCache().then(() => {
-        // Pre-warm: show full list as soon as the field is first focused
-    });
+    DB.seedExercises()
+        .then(loadExerciseDefs)
+        .then(autoImportCSV)
+        .then(refreshExerciseCache);
     loadTodaySets();
+    // NOTE: initBodyweight() is invoked in section 5b, after `bodyweightInput`
+    // (a const) is declared — calling it here would hit the temporal dead zone.
+
+    // Load all exercise definitions from the DB into the in-memory EXERCISE_DEFS map
+    // (declared in exercises.js) so getCategory()/getDef() resolve synchronously.
+    async function loadExerciseDefs() {
+        const defs = await DB.getAllExercises();
+        if (defs.length) {
+            EXERCISE_DEFS = Object.fromEntries(defs.map(d => [d.name, d]));
+        }
+    }
 
     // ── Rest Timer ───────────────────────────────────────────────────────────────
     const restTimer   = document.getElementById('rest-timer');
@@ -70,7 +90,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. EXERCISE CACHE  (rebuilt after each save)
     // =============================================
     async function refreshExerciseCache() {
-        const names = await DB.getUniqueExercises(); // already sorted A→Z
+        // Union of exercises that have been logged AND those that are defined,
+        // so seeded/custom exercises are selectable even before their first log.
+        const logged  = await DB.getUniqueExercises();
+        const defined = (await DB.getAllExercises()).map(d => d.name);
+        const names   = [...new Set([...logged, ...defined])].sort();
         // Fetch last set for each exercise in parallel
         allExercises = await Promise.all(
             names.map(async name => {
@@ -79,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     name,
                     lastWeight: last ? last.weight : null,
                     lastReps:   last ? last.reps   : null,
+                    def:        getDef(name),
                 };
             })
         );
@@ -112,7 +137,13 @@ document.addEventListener('DOMContentLoaded', () => {
         dropdown.innerHTML = '';
 
         if (matches.length === 0) {
-            dropdown.innerHTML = '<div class="autocomplete-empty">No matches — type to add new</div>';
+            const empty = document.createElement('div');
+            empty.className = 'autocomplete-empty';
+            empty.textContent = q ? `+ Add "${q}" as a new exercise` : 'No exercises yet — tap to add one';
+            const openAdd = (e) => { e.preventDefault(); closeDropdown(); openExerciseModal(null, q); };
+            empty.addEventListener('touchend', openAdd);
+            empty.addEventListener('mousedown', openAdd);
+            dropdown.appendChild(empty);
         } else {
             matches.forEach(item => {
                 const el = document.createElement('div');
@@ -164,6 +195,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function selectExercise(item) {
         exerciseInput.value = item.name;
 
+        // Adapt the form to this exercise's tracking type
+        applyTracking(item.def);
+
         // Auto-fill weight & reps from the last time this exercise was logged
         if (item.lastWeight !== null) weightInput.value = item.lastWeight;
         if (item.lastReps   !== null) repsInput.value   = item.lastReps;
@@ -174,6 +208,41 @@ document.addEventListener('DOMContentLoaded', () => {
         // (user just got their values pre-filled — they can adjust with steppers)
         notesInput.focus();
     }
+
+    // Show/hide the relevant input rows for the given exercise definition.
+    function applyTracking(def) {
+        currentTracking = def?.tracking || 'weighted';
+        const isWeighted   = currentTracking === 'weighted';
+        const isBodyweight = currentTracking === 'bodyweight';
+        const isBanded     = currentTracking === 'banded';
+        const isTimed      = currentTracking === 'timed';
+
+        // Weight: shown for weighted (required-ish) and as optional "Added weight"
+        // for bodyweight/timed. Hidden for banded.
+        groupWeight.classList.toggle('hidden', isBanded);
+        weightLabel.textContent = isWeighted ? 'Weight (lbs)' : 'Added weight (lbs)';
+
+        // Reps: shown for everything except timed holds
+        groupReps.classList.toggle('hidden', isTimed);
+
+        // Duration: timed only
+        groupDuration.classList.toggle('hidden', !isTimed);
+
+        // Band level: banded only
+        groupBand.classList.toggle('hidden', !isBanded);
+    }
+
+    // Band-level segmented control
+    let currentBand = 'medium';
+    bandSegmented.querySelectorAll('.seg-btn').forEach(btn => {
+        const pick = (e) => {
+            e.preventDefault();
+            currentBand = btn.dataset.band;
+            bandSegmented.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+        };
+        btn.addEventListener('touchend', pick);
+        btn.addEventListener('click', pick);
+    });
 
     // Open on focus (show full list)
     exerciseInput.addEventListener('focus', () => {
@@ -261,6 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
             reps:     parseInt(repsInput.value)     || 0,
             notes:    notesInput.value.trim()
         };
+        // Tracking-type specific fields
+        if (currentTracking === 'timed')  set.duration  = parseInt(durationInput.value) || 0;
+        if (currentTracking === 'banded') set.bandLevel = currentBand;
 
         await DB.addSet(set);
         startTimer(Date.now()); // ← must be inside DOMContentLoaded, after addSet
@@ -295,34 +367,79 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadHistory() {
-        const sets = await DB.getAllSets();
+        const sets = await DB.getAllSets(); // newest-first
         const container = document.getElementById('history-container');
         container.innerHTML = '';
         if (!sets.length) { container.innerHTML = '<p style="padding:20px;">No workout history found.</p>'; return; }
-    
-        // ── Build per-day metadata ───────────────────────────────────────────────
-        // keyed by toLocaleDateString() to match the days[] structure below
-        const dayMeta = {}; // { dateKey: { exercises: Set } }
-        sets.forEach(s => {
-            const k = new Date(s.timestamp).toLocaleDateString();
-            if (!dayMeta[k]) dayMeta[k] = { exercises: new Set() };
-            dayMeta[k].exercises.add(s.exercise);
-        });
-    
-        // ── Heatmap (last 84 days) ───────────────────────────────────────────────
+
+        const dayKey     = ts => new Date(ts).toLocaleDateString();
+        const setVolume  = s => loadOf(s, getDef(s.exercise), bodyweightAt(s.timestamp)) * (s.reps || 0);
+        const trainedDays = new Set(sets.map(s => dayKey(s.timestamp)));
+
         let activeDateFilter = null;
+        let activeFilter     = null; // category: 'push'|'pull'|'legs'|'core'|null
+
+        // ── Summary stats ────────────────────────────────────────────────────────
+        function computeStreak() {
+            let streak = 0;
+            const d = new Date(); d.setHours(0, 0, 0, 0);
+            if (!trainedDays.has(d.toLocaleDateString())) d.setDate(d.getDate() - 1); // allow rest-today
+            while (trainedDays.has(d.toLocaleDateString())) { streak++; d.setDate(d.getDate() - 1); }
+            return streak;
+        }
+        const nowD = new Date();
+        const thisMonth = new Set(
+            sets.filter(s => { const t = new Date(s.timestamp); return t.getMonth() === nowD.getMonth() && t.getFullYear() === nowD.getFullYear(); })
+                .map(s => dayKey(s.timestamp))
+        ).size;
+        const totalVolume = Math.round(sets.reduce((a, s) => a + setVolume(s), 0));
+        const fmtVol = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : v.toLocaleString();
+
+        const statsRow = document.createElement('div');
+        statsRow.className = 'stats-row';
+        statsRow.innerHTML = [
+            { v: computeStreak(),   l: 'Day streak'   },
+            { v: thisMonth,         l: 'This month'   },
+            { v: trainedDays.size,  l: 'Days trained' },
+            { v: fmtVol(totalVolume), l: 'Total lbs'  },
+        ].map(s => `<div class="stat-card"><div class="stat-value">${s.v}</div><div class="stat-label">${s.l}</div></div>`).join('');
+        container.appendChild(statsRow);
+
+        // ── Per-day category metadata ────────────────────────────────────────────
+        const dayMeta = {}; // { dateKey: Set<exercise> }
+        sets.forEach(s => { (dayMeta[dayKey(s.timestamp)] ||= new Set()).add(s.exercise); });
+
+        // ── Heatmap (GitHub-style: 7 weekday rows × week columns, last ~12 weeks) ──
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const start = new Date(today); start.setDate(start.getDate() - 83);
+        start.setDate(start.getDate() - start.getDay()); // back up to Sunday
+        const weeks = Math.ceil((Math.round((today - start) / 86400000) + 1) / 7);
+
+        const heatWrap = document.createElement('div');
+        heatWrap.className = 'heat-wrap';
+
+        const monthRow = document.createElement('div');
+        monthRow.className = 'heat-months';
+        let lastMonth = -1;
+        for (let w = 0; w < weeks; w++) {
+            const d = new Date(start); d.setDate(d.getDate() + w * 7);
+            const lbl = document.createElement('span');
+            if (d.getMonth() !== lastMonth) { lbl.textContent = d.toLocaleDateString('en-US', { month: 'short' }); lastMonth = d.getMonth(); }
+            monthRow.appendChild(lbl);
+        }
+
         const heatmap = document.createElement('div');
         heatmap.className = 'heatmap';
-    
-        for (let i = 83; i >= 0; i--) {
-            const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
+        for (let i = 0; i < weeks * 7; i++) {
+            const d = new Date(start); d.setDate(d.getDate() + i);
+            const cell = document.createElement('div');
+            cell.className = 'heat-cell';
+            if (d > today) { cell.classList.add('heat-future'); heatmap.appendChild(cell); continue; }
+            if (d.getTime() === today.getTime()) cell.classList.add('heat-today');
             const dateKey = d.toLocaleDateString();
-            const meta    = dayMeta[dateKey];
-            const cell    = document.createElement('div');
-    
+            const meta = dayMeta[dateKey];
             if (meta) {
-                const cat = sessionCategory([...meta.exercises]);
-                cell.className = `heat-cell heat-${cat||'mixed'}`;
+                cell.classList.add(`heat-${sessionCategory([...meta]) || 'mixed'}`);
                 cell.addEventListener('click', () => {
                     const isSame = activeDateFilter === dateKey;
                     activeDateFilter = isSame ? null : dateKey;
@@ -330,117 +447,181 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!isSame) cell.classList.add('selected');
                     renderSessions();
                 });
-            } else {
-                cell.className = 'heat-cell'; // rest day — no interaction
             }
             heatmap.appendChild(cell);
         }
-        container.appendChild(heatmap);
-    
-        // ── Filter chips ─────────────────────────────────────────────────────────
-        const exercises = [...new Set(sets.map(s => s.exercise))].sort();
-        let activeFilter = null;
+        heatWrap.appendChild(monthRow);
+        heatWrap.appendChild(heatmap);
+        container.appendChild(heatWrap);
+
+        // Legend
+        const legend = document.createElement('div');
+        legend.className = 'heat-legend';
+        legend.innerHTML = [['push','Push'],['pull','Pull'],['legs','Legs'],['core','Core'],['mixed','Mixed']]
+            .map(([c, l]) => `<span class="legend-item"><span class="legend-swatch heat-${c}"></span>${l}</span>`).join('');
+        container.appendChild(legend);
+
+        // ── Category filter chips ────────────────────────────────────────────────
         const chipsRow = document.createElement('div');
         chipsRow.className = 'filter-chips';
-        ['All', ...exercises].forEach(ex => {
+        [['All', null], ['Push', 'push'], ['Pull', 'pull'], ['Legs', 'legs'], ['Core', 'core']].forEach(([label, cat]) => {
             const chip = document.createElement('div');
-            chip.className = 'chip' + (ex==='All'?' active':'');
-            chip.textContent = ex;
+            chip.className = 'chip' + (cat === null ? ' active' : '');
+            chip.textContent = label;
             chip.addEventListener('click', () => {
-                activeFilter = ex==='All' ? null : ex;
-                chipsRow.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c===chip));
+                activeFilter = cat;
+                chipsRow.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c === chip));
                 renderSessions();
             });
             chipsRow.appendChild(chip);
         });
         container.appendChild(chipsRow);
-    
-        // ── Group sets into day buckets ──────────────────────────────────────────
+
+        // ── Clear-filter banner ──────────────────────────────────────────────────
+        const banner = document.createElement('div');
+        banner.className = 'filter-banner hidden';
+        banner.addEventListener('click', () => {
+            activeDateFilter = null;
+            activeFilter = null;
+            heatmap.querySelectorAll('.heat-cell').forEach(c => c.classList.remove('selected'));
+            chipsRow.querySelectorAll('.chip').forEach((c, idx) => c.classList.toggle('active', idx === 0));
+            renderSessions();
+        });
+        container.appendChild(banner);
+
+        // ── Group sets into day buckets (newest-first) ───────────────────────────
         const days = [];
         sets.forEach(s => {
-            const key = new Date(s.timestamp).toLocaleDateString();
-            if (!days.length || days[days.length-1].key !== key) days.push({key, sets:[]});
-            days[days.length-1].sets.push(s);
+            const key = dayKey(s.timestamp);
+            if (!days.length || days[days.length - 1].key !== key) days.push({ key, sets: [] });
+            days[days.length - 1].sets.push(s);
         });
-    
-        // ── Per-exercise history for progress arrows ─────────────────────────────
+
+        // ── Per-exercise day history for tracking-aware trend arrows ──────────────
+        function sessionMetric(s) {
+            const t = trackingOf(s);
+            if (t === 'timed')  return s.duration || 0;
+            if (t === 'banded') return s.reps || 0;
+            return e1rm(loadOf(s, getDef(s.exercise), bodyweightAt(s.timestamp)), s.reps || 0);
+        }
         const exerciseDays = {};
-        [...sets].reverse().forEach(s => {
-            const date = new Date(s.timestamp).toLocaleDateString();
-            if (!exerciseDays[s.exercise]) exerciseDays[s.exercise] = [];
-            const arr = exerciseDays[s.exercise];
-            if (!arr.length || arr[arr.length-1].date !== date)
-                arr.push({date, maxW:s.weight, maxR:s.reps});
-            else {
-                const last = arr[arr.length-1];
-                if (s.weight>last.maxW||(s.weight===last.maxW&&s.reps>last.maxR)){last.maxW=s.weight;last.maxR=s.reps;}
-            }
+        [...sets].reverse().forEach(s => { // chronological
+            const date = dayKey(s.timestamp);
+            const arr = exerciseDays[s.exercise] ||= [];
+            const m = sessionMetric(s);
+            if (!arr.length || arr[arr.length - 1].date !== date) arr.push({ date, metric: m });
+            else arr[arr.length - 1].metric = Math.max(arr[arr.length - 1].metric, m);
         });
-    
         function progressIcon(ex, date) {
             const arr = exerciseDays[ex]; if (!arr) return '';
-            const i = arr.findIndex(h => h.date===date);
-            if (i<=0) return '';
-            const [cur,prev] = [arr[i],arr[i-1]];
-            if (cur.maxW>prev.maxW||(cur.maxW===prev.maxW&&cur.maxR>prev.maxR)) return ' <span class="pill-up">↑</span>';
-            if (cur.maxW<prev.maxW||(cur.maxW===prev.maxW&&cur.maxR<prev.maxR)) return ' <span class="pill-down">↓</span>';
+            const i = arr.findIndex(h => h.date === date);
+            if (i <= 0) return '';
+            if (arr[i].metric > arr[i - 1].metric) return ' <span class="pill-up">↑</span>';
+            if (arr[i].metric < arr[i - 1].metric) return ' <span class="pill-down">↓</span>';
             return '';
         }
-    
+
         // ── Sessions ─────────────────────────────────────────────────────────────
         const sessionsDiv = document.createElement('div');
         container.appendChild(sessionsDiv);
-    
+
         function renderSessions() {
             sessionsDiv.innerHTML = '';
-            let visible = activeDateFilter
-                ? days.filter(d => d.key === activeDateFilter)
-                : days;
+
+            // Filter banner
+            const parts = [];
+            if (activeDateFilter) parts.push(new Date(activeDateFilter).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }));
+            if (activeFilter)     parts.push(activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1));
+            if (parts.length) {
+                banner.classList.remove('hidden');
+                banner.innerHTML = `Showing ${parts.join(' · ')} <span class="banner-x">✕ clear</span>`;
+            } else banner.classList.add('hidden');
+
+            let visible = activeDateFilter ? days.filter(d => d.key === activeDateFilter) : days;
             if (activeFilter)
-                visible = visible.map(d => ({...d, sets:d.sets.filter(s => s.exercise===activeFilter)})).filter(d => d.sets.length);
-    
+                visible = visible.map(d => ({ ...d, sets: d.sets.filter(s => getCategory(s.exercise) === activeFilter) })).filter(d => d.sets.length);
+
             visible.forEach((day, i) => {
-                const byEx = {};
-                day.sets.forEach(s => { (byEx[s.exercise]||(byEx[s.exercise]=[])).push(s); });
-                const exNames = Object.keys(byEx);
-                const vol = Math.round(day.sets.reduce((a,s) => a+s.weight*s.reps, 0)).toLocaleString();
-                const label = new Date(day.sets[0].timestamp).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+                const setsAsc = [...day.sets].sort((a, b) => a.timestamp - b.timestamp); // order performed
+                const exNames = [...new Set(setsAsc.map(s => s.exercise))];
+                const vol = Math.round(day.sets.reduce((a, s) => a + setVolume(s), 0)).toLocaleString();
+                const label = new Date(setsAsc[0].timestamp).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
                 const sessionCat = sessionCategory(exNames);
-    
+                const tag = sessionCat ? `<span class="cat-tag" data-cat="${sessionCat}">${sessionCat}</span>` : '';
+
                 const card = document.createElement('div');
-                card.className = 'session-card' + (i===0?' open':'');
+                card.className = 'session-card' + (i === 0 ? ' open' : '');
                 if (sessionCat) card.dataset.cat = sessionCat;
                 card.innerHTML = `
                     <div class="session-header">
-                        <div><div style="font-weight:600">${label}</div>
-                        <div class="session-summary">${exNames.length} exercise${exNames.length!==1?'s':''} · ${vol} lbs</div></div>
+                        <div>
+                            <div class="session-title">${label} ${tag}</div>
+                            <div class="session-summary">${exNames.length} exercise${exNames.length !== 1 ? 's' : ''} · ${setsAsc.length} set${setsAsc.length !== 1 ? 's' : ''} · ${vol} lbs</div>
+                        </div>
                         <span class="session-toggle">⌄</span>
                     </div>
                     <div class="session-body"></div>`;
-    
+
+                // Flat chronological timeline — one row per set, in the order performed
                 const body = card.querySelector('.session-body');
-                exNames.forEach(ex => {
-                    const exCat = getCategory(ex);
-                    const pills = byEx[ex].map(s =>
-                        `<span class="set-pill"${exCat?` data-cat="${exCat}"`:''}>${s.weight}lb × ${s.reps}</span>`
-                    ).join('');
-                    const g = document.createElement('div');
-                    g.className = 'exercise-group';
-                    g.innerHTML = `<div class="exercise-name${exCat?` cat-${exCat}`:''}">
-                        ${ex}${progressIcon(ex, day.key)}
-                    </div><div class="set-pills">${pills}</div>`;
-                    body.appendChild(g);
+                const seen = new Set();
+                setsAsc.forEach(s => {
+                    const exCat = getCategory(s.exercise);
+                    const time  = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const arrow = seen.has(s.exercise) ? '' : progressIcon(s.exercise, day.key);
+                    seen.add(s.exercise);
+                    const row = document.createElement('div');
+                    row.className = 'timeline-row';
+                    if (exCat) row.dataset.cat = exCat;
+                    row.innerHTML = `
+                        <span class="tl-time">${time}</span>
+                        <span class="tl-ex${exCat ? ` cat-${exCat}` : ''}">${s.exercise}${arrow}</span>
+                        <span class="tl-detail">${formatSet(s)}</span>`;
+                    body.appendChild(row);
                 });
-    
+
                 card.querySelector('.session-header').addEventListener('click', () => card.classList.toggle('open'));
                 sessionsDiv.appendChild(card);
             });
-    
+
             if (!visible.length)
-                sessionsDiv.innerHTML = '<p style="padding:20px;color:var(--text-secondary)">No sessions for this day.</p>';
+                sessionsDiv.innerHTML = '<p style="padding:20px;color:var(--text-secondary)">No sessions for this filter.</p>';
         }
-    
+
         renderSessions();
+    }
+
+    // Format a set for display based on its exercise's tracking type.
+    function trackingOf(set) {
+        return getDef(set.exercise)?.tracking || 'weighted';
+    }
+    function fmtDuration(sec) {
+        const s = sec || 0;
+        return s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+    }
+    function formatSet(set) {
+        switch (trackingOf(set)) {
+            case 'timed':
+                return `${fmtDuration(set.duration)}${set.weight ? ` + ${set.weight} lbs` : ''}`;
+            case 'banded':
+                return `${set.reps} reps · ${set.bandLevel || 'medium'} band`;
+            case 'bodyweight':
+                return `${set.reps} reps${set.weight ? ` + ${set.weight} lbs` : ''}`;
+            default:
+                return `${set.weight} lbs × ${set.reps} reps`;
+        }
+    }
+    function formatSetShort(set) {
+        switch (trackingOf(set)) {
+            case 'timed':
+                return fmtDuration(set.duration);
+            case 'banded':
+                return `${set.reps} (${(set.bandLevel || 'med').slice(0,3)})`;
+            case 'bodyweight':
+                return `${set.reps}${set.weight ? `+${set.weight}` : ''}`;
+            default:
+                return `${set.weight}lb × ${set.reps}`;
+        }
     }
 
     function createSetElement(set) {
@@ -451,7 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         li.innerHTML = `
             <div class="set-details">
                 <h3>${set.exercise}</h3>
-                <p>${set.weight} lbs × ${set.reps} reps ${set.notes ? `| ${set.notes}` : ''}</p>
+                <p>${formatSet(set)} ${set.notes ? `| ${set.notes}` : ''}</p>
             </div>
             <div class="set-time">${time}</div>
         `;
@@ -470,8 +651,33 @@ document.addEventListener('DOMContentLoaded', () => {
         // ── ANALYSIS TAB ─────────────────────────────────────────────────────────────
     let analysisChart = null;
 
-    function e1rm(weight, reps) {
-        return weight * (1 + reps / 30); // Epley formula
+    function e1rm(load, reps) {
+        return load * (1 + reps / 30); // Epley formula
+    }
+
+    // Effective load for a set, accounting for bodyweight movements.
+    // For bodyweight exercises, `weight` is extra load added (positive) or assistance
+    // removed (negative, e.g. assisted pull-ups), so it's added to the bodyweight load.
+    // Floored at 0 so over-assisted reps never produce negative volume/e1RM.
+    function loadOf(set, def, bw) {
+        if ((def?.tracking) === 'bodyweight')
+            return Math.max(0, bw * (def.bwFraction ?? 1) + (set.weight || 0));
+        return set.weight || 0;
+    }
+
+    // Unified per-set "volume" comparable across all tracking types, so banded/timed
+    // work isn't ~0 on the muscle map. Returns { vol (unified), lbs (load-volume or 0) }.
+    const BAND_LOAD = { light: 15, medium: 30, heavy: 50 };
+    function muscleVolume(set, def, bw) {
+        const t = def?.tracking || 'weighted';
+        if (t === 'banded')
+            return { vol: (BAND_LOAD[set.bandLevel] || BAND_LOAD.medium) * (set.reps || 0), lbs: 0 };
+        if (t === 'timed') {
+            const load = Math.max(bw * (def?.bwFraction ?? 0), 1);
+            return { vol: load * ((set.duration || 0) / 3), lbs: 0 }; // ~1 rep per 3s hold
+        }
+        const lbs = loadOf(set, def, bw) * (set.reps || 0);
+        return { vol: lbs, lbs };
     }
 
     async function loadAnalysis() {
@@ -516,24 +722,66 @@ document.addEventListener('DOMContentLoaded', () => {
         const labels   = sessions.map(([, s]) =>
             new Date(s.timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric' }));
 
-        const avgE1rms = sessions.map(([, s]) => {
-            const vals = s.sets.map(x => e1rm(x.weight, x.reps));
-            return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-        });
+        const def      = getDef(exerciseName);
+        const tracking = def?.tracking || 'weighted';
+        // Effective load for a set, using the bodyweight in effect on that set's date.
+        const loadAt   = (s) => loadOf(s, def, bodyweightAt(s.timestamp));
+        // Bodyweight movements only get e1RM if extra weight was actually added.
+        const anyAdded = sets.some(s => (s.weight || 0) > 0);
+        const useE1rm  = tracking === 'weighted' || (tracking === 'bodyweight' && anyAdded);
 
-        const volumes  = sessions.map(([, s]) =>
-            Math.round(s.sets.reduce((a, x) => a + x.weight * x.reps, 0)));
+        // Per-tracking metrics: { lineData, lineLabel, lineAxis, barData, barLabel, barAxis, pr }
+        let lineData, lineLabel, lineAxis, barData, barLabel, barAxis, prHtml;
+        const dated = (ts) => new Date(ts).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 
-        // PR = single set with highest e1RM
-        const prSet  = sets.reduce((best, s) => e1rm(s.weight, s.reps) > e1rm(best.weight, best.reps) ? s : best);
-        const prVal  = Math.round(e1rm(prSet.weight, prSet.reps));
-        const prDate = new Date(prSet.timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+        if (tracking === 'banded') {
+            lineData  = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + (x.reps||0), 0) / s.sets.length));
+            barData   = sessions.map(([, s]) => s.sets.reduce((a, x) => a + (x.reps||0), 0));
+            lineLabel = 'Avg reps'; lineAxis = 'Reps';
+            barLabel  = 'Total reps'; barAxis = 'Total reps';
+            const prSet = sets.reduce((b, s) => (s.reps||0) > (b.reps||0) ? s : b);
+            prHtml = `<span class="pr-set">${prSet.reps} reps · ${prSet.bandLevel||'medium'} band</span>
+                      <span class="pr-e1rm">Best set · ${dated(prSet.timestamp)}</span>`;
+        } else if (tracking === 'timed') {
+            lineData  = sessions.map(([, s]) => Math.max(...s.sets.map(x => x.duration||0)));
+            barData   = sessions.map(([, s]) => s.sets.reduce((a, x) => a + (x.duration||0), 0));
+            lineLabel = 'Best hold (s)'; lineAxis = 'Seconds';
+            barLabel  = 'Total time (s)'; barAxis = 'Total seconds';
+            const prSet = sets.reduce((b, s) => (s.duration||0) > (b.duration||0) ? s : b);
+            prHtml = `<span class="pr-set">${fmtDuration(prSet.duration)}${prSet.weight?` + ${prSet.weight} lbs`:''}</span>
+                      <span class="pr-e1rm">Longest hold · ${dated(prSet.timestamp)}</span>`;
+        } else if (useE1rm) {
+            // weighted, or bodyweight WITH added weight → e1RM line + volume bars.
+            // Volume uses each set's date-accurate bodyweight (bodyweight changes over time).
+            lineData = sessions.map(([, s]) => {
+                const vals = s.sets.map(x => e1rm(loadAt(x), x.reps));
+                return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+            });
+            barData   = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + loadAt(x) * x.reps, 0)));
+            lineLabel = 'Avg e1RM (lbs)'; lineAxis = 'e1RM (lbs)';
+            barLabel  = 'Volume (lbs)'; barAxis = 'Volume (lbs)';
+            const prSet = sets.reduce((b, s) => e1rm(loadAt(s), s.reps) > e1rm(loadAt(b), b.reps) ? s : b);
+            const prVal = Math.round(e1rm(loadAt(prSet), prSet.reps));
+            const bwNote = (tracking === 'bodyweight' && !getBodyweight())
+                ? ` <span class="pr-e1rm">⚠️ set your bodyweight in Settings</span>` : '';
+            prHtml = `<span class="pr-set">${formatSet(prSet)}</span>
+                      <span class="pr-e1rm">e1RM: ${prVal} lbs · ${dated(prSet.timestamp)}</span>${bwNote}`;
+        } else {
+            // Pure bodyweight (no added weight) → reps line + bodyweight-aware volume bars.
+            // No e1RM: it would just track reps anyway, so we show reps directly.
+            lineData  = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + (x.reps||0), 0) / s.sets.length));
+            barData   = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + loadAt(x) * (x.reps||0), 0)));
+            lineLabel = 'Avg reps'; lineAxis = 'Reps';
+            barLabel  = 'Volume (lbs)'; barAxis = 'Volume (lbs)';
+            const prSet = sets.reduce((b, s) => (s.reps||0) > (b.reps||0) ? s : b);
+            const bwNote = !getBodyweight()
+                ? ` <span class="pr-e1rm">⚠️ set your bodyweight in Settings for volume</span>` : '';
+            prHtml = `<span class="pr-set">${prSet.reps} reps</span>
+                      <span class="pr-e1rm">Most reps · ${dated(prSet.timestamp)}</span>${bwNote}`;
+        }
 
         prCard.className = 'pr-card';
-        prCard.innerHTML = `
-            <span class="pr-label">🏆 PR Set</span>
-            <span class="pr-set">${prSet.weight} lbs × ${prSet.reps} reps</span>
-            <span class="pr-e1rm">e1RM: ${prVal} lbs · ${prDate}</span>`;
+        prCard.innerHTML = `<span class="pr-label">🏆 PR Set</span>${prHtml}`;
 
         const cat      = getCategory(exerciseName);
         const accent   = cat==='push' ? '#ff6b6b' : cat==='pull' ? '#4dabf7' : cat==='legs' ? '#69db7c' : '#007bff';
@@ -546,8 +794,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 datasets: [
                     {
                         type: 'line',
-                        label: 'Avg e1RM (lbs)',
-                        data: avgE1rms,
+                        label: lineLabel,
+                        data: lineData,
                         borderColor: accent,
                         backgroundColor: accent + '22',
                         fill: true,
@@ -559,8 +807,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                     {
                         type: 'bar',
-                        label: 'Volume (lbs)',
-                        data: volumes,
+                        label: barLabel,
+                        data: barData,
                         backgroundColor: '#ffffff12',
                         borderColor: '#ffffff25',
                         borderWidth: 1,
@@ -590,13 +838,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                     y: {
                         position: 'left',
-                        title: { display: true, text: 'e1RM (lbs)', color: '#aaa', font: { size: 10 } },
+                        title: { display: true, text: lineAxis, color: '#aaa', font: { size: 10 } },
                         ticks: { color: accent, font: { size: 10 } },
                         grid:  { color: '#2a2a2a' }
                     },
                     y2: {
                         position: 'right',
-                        title: { display: true, text: 'Volume (lbs)', color: '#aaa', font: { size: 10 } },
+                        title: { display: true, text: barAxis, color: '#aaa', font: { size: 10 } },
                         ticks: { color: '#555', font: { size: 10 } },
                         grid:  { drawOnChartArea: false }
                     }
@@ -608,6 +856,275 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('analysis-exercise')
         .addEventListener('change', e => renderAnalysis(e.target.value));
     // ─────────────────────────────────────────────────────────────────────────────
+
+    // ── MUSCLE MAP ───────────────────────────────────────────────────────────────
+    const bodyFront    = document.getElementById('body-front');
+    const bodyBack     = document.getElementById('body-back');
+    const muscleTip    = document.getElementById('muscle-tooltip');
+    let   muscleBuilt  = false;
+    let   musclePeriod = 30;
+
+    // Build the two SVGs once from BODY_SVG (muscles.js). Trainable regions get a
+    // `.muscle-region[data-muscle]`; everything else is a neutral backdrop.
+    function buildBodySVGs() {
+        if (muscleBuilt) return;
+        const make = (svg, parts) => {
+            svg.innerHTML = parts.map(part => {
+                const trainable = MUSCLE_CATEGORY[part.slug] !== undefined;
+                const cls = trainable ? 'muscle-region' : 'muscle-region neutral';
+                const attr = trainable ? ` data-muscle="${part.slug}"` : '';
+                return part.paths.map(d => `<path class="${cls}"${attr} d="${d}"/>`).join('');
+            }).join('');
+        };
+        make(bodyFront, BODY_SVG.front);
+        make(bodyBack,  BODY_SVG.back);
+
+        // Tooltip handlers (delegated per region)
+        document.querySelectorAll('#analysis-muscle-mode .muscle-region[data-muscle]').forEach(el => {
+            const show = (e) => showMuscleTip(e, el.dataset.muscle);
+            el.addEventListener('mouseenter', show);
+            el.addEventListener('mousemove', show);
+            el.addEventListener('touchstart', show, { passive: true });
+            el.addEventListener('mouseleave', () => muscleTip.classList.add('hidden'));
+        });
+        document.addEventListener('touchstart', (e) => {
+            if (!e.target.closest('.muscle-region')) muscleTip.classList.add('hidden');
+        }, { passive: true });
+        muscleBuilt = true;
+    }
+
+    let muscleStats = {}; // { slug: { vol, lbs, sets } } for the active period
+    function showMuscleTip(e, slug) {
+        const s = muscleStats[slug] || { vol: 0, lbs: 0, sets: 0 };
+        const pt = e.touches ? e.touches[0] : e;
+        muscleTip.innerHTML =
+            `<div class="mt-name">${MUSCLE_LABELS[slug] || slug}</div>` +
+            `<div class="mt-stat">${Math.round(s.lbs).toLocaleString()} lbs · ${s.sets} set${s.sets!==1?'s':''}</div>`;
+        muscleTip.classList.remove('hidden');
+        const x = Math.min(pt.clientX + 12, window.innerWidth - 160);
+        const y = Math.max(pt.clientY - 10, 10);
+        muscleTip.style.left = x + 'px';
+        muscleTip.style.top  = y + 'px';
+    }
+
+    async function renderMuscleMap(periodDays) {
+        buildBodySVGs();
+        const all = await DB.getAllSets();
+        const cutoff = periodDays ? Date.now() - periodDays * 86400000 : 0;
+        const sets = all.filter(s => s.timestamp >= cutoff);
+
+        // Aggregate volume per muscle
+        muscleStats = {};
+        sets.forEach(s => {
+            const def = getDef(s.exercise);
+            const { vol, lbs } = muscleVolume(s, def, bodyweightAt(s.timestamp));
+            const weights = getMuscleWeights(s.exercise);
+            for (const slug in weights) {
+                const m = muscleStats[slug] || (muscleStats[slug] = { vol: 0, lbs: 0, sets: 0 });
+                m.vol  += vol * weights[slug];
+                m.lbs  += lbs * weights[slug];
+                m.sets += 1;
+            }
+        });
+
+        const maxVol = Math.max(1, ...Object.values(muscleStats).map(m => m.vol));
+
+        // Shade every trainable region
+        document.querySelectorAll('#analysis-muscle-mode .muscle-region[data-muscle]').forEach(el => {
+            const slug = el.dataset.muscle;
+            const cat  = MUSCLE_CATEGORY[slug];
+            const m    = muscleStats[slug];
+            if (m && m.vol > 0) {
+                el.style.fill = CATEGORY_COLOR[cat];
+                el.style.fillOpacity = (0.15 + 0.85 * (m.vol / maxVol)).toFixed(3);
+            } else {
+                el.style.fill = '';          // fall back to CSS base (#2c2c2c)
+                el.style.fillOpacity = '1';
+            }
+        });
+    }
+
+    // Mode toggle (Exercise | Muscles)
+    const exerciseModeEl = document.getElementById('analysis-exercise-mode');
+    const muscleModeEl   = document.getElementById('analysis-muscle-mode');
+    let   analysisMode   = 'exercise';
+    document.querySelectorAll('#analysis-mode .seg-btn').forEach(btn => {
+        const pick = (e) => {
+            e.preventDefault();
+            analysisMode = btn.dataset.mode;
+            document.querySelectorAll('#analysis-mode .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+            const muscles = analysisMode === 'muscles';
+            exerciseModeEl.classList.toggle('hidden', muscles);
+            muscleModeEl.classList.toggle('hidden', !muscles);
+            if (muscles) renderMuscleMap(musclePeriod);
+        };
+        btn.addEventListener('click', pick);
+    });
+
+    // Period chips
+    document.querySelectorAll('#muscle-period .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            musclePeriod = parseInt(chip.dataset.days) || 0;
+            document.querySelectorAll('#muscle-period .chip').forEach(c => c.classList.toggle('active', c === chip));
+            renderMuscleMap(musclePeriod);
+        });
+    });
+
+    // =============================================
+    // 5b. BODYWEIGHT SETTING
+    // =============================================
+    const bodyweightInput = document.getElementById('bodyweight');
+
+    // Current (latest) bodyweight — used for the form display & as a fallback.
+    function getBodyweight() { return parseFloat(localStorage.getItem('bodyweight')) || 0; }
+
+    // Dated log of bodyweight entries: [{ t: timestamp, v: lbs }, …] (sorted ascending).
+    function getBodyweightLog() {
+        try { return (JSON.parse(localStorage.getItem('bodyweight_log')) || []).sort((a, b) => a.t - b.t); }
+        catch { return []; }
+    }
+    function recordBodyweight(v) {
+        const log = getBodyweightLog();
+        log.push({ t: Date.now(), v });
+        localStorage.setItem('bodyweight_log', JSON.stringify(log));
+        localStorage.setItem('bodyweight', String(v)); // latest, for the input + fallback
+    }
+    // Bodyweight in effect at a given moment: the most recent entry on/before it
+    // (falls back to the earliest entry, then to the current single value).
+    function bodyweightAt(timestamp) {
+        const log = getBodyweightLog();
+        if (!log.length) return getBodyweight();
+        let bw = log[0].v;
+        for (const e of log) { if (e.t <= timestamp) bw = e.v; else break; }
+        return bw;
+    }
+
+    function initBodyweight() {
+        const bw = getBodyweight();
+        if (bw) bodyweightInput.value = bw;
+    }
+    initBodyweight();
+    bodyweightInput.addEventListener('change', () => {
+        const v = parseFloat(bodyweightInput.value) || 0;
+        recordBodyweight(v);
+        // Refresh analysis if it's open, so bodyweight-based numbers update.
+        const sel = document.getElementById('analysis-exercise');
+        if (sel.value && !document.getElementById('view-analysis').classList.contains('hidden'))
+            renderAnalysis(sel.value);
+    });
+
+    // =============================================
+    // 5c. ADD / EDIT EXERCISE MODAL
+    // =============================================
+    const exModal     = document.getElementById('exercise-modal');
+    const exNameInput = document.getElementById('ex-name');
+    const exCategory  = document.getElementById('ex-category');
+    const exEquipment = document.getElementById('ex-equipment');
+    const exPattern   = document.getElementById('ex-pattern');
+    const exTracking  = document.getElementById('ex-tracking');
+    const exBwGroup   = document.getElementById('ex-bwfraction-group');
+    const exBwInput   = document.getElementById('ex-bwfraction');
+    let   exEditingOriginalName = null; // non-null when editing an existing exercise
+
+    // Populate the static <select>s once
+    function fillSelect(sel, values) {
+        sel.innerHTML = '';
+        values.forEach(v => {
+            const o = document.createElement('option');
+            o.value = v; o.textContent = v;
+            sel.appendChild(o);
+        });
+    }
+    fillSelect(exEquipment, EQUIPMENT_TYPES);
+    fillSelect(exPattern,   MOVEMENT_PATTERNS);
+    fillSelect(exTracking,  TRACKING_TYPES);
+
+    // Show the bodyweight-fraction field only for bodyweight tracking
+    exTracking.addEventListener('change', () => {
+        exBwGroup.classList.toggle('hidden', exTracking.value !== 'bodyweight');
+    });
+
+    // def === null → new exercise (prefill name with nameSeed)
+    function openExerciseModal(def, nameSeed = '') {
+        exEditingOriginalName = def ? def.name : null;
+        document.getElementById('exercise-modal-title').textContent = def ? 'Edit Exercise' : 'New Exercise';
+        exNameInput.value  = def ? def.name : nameSeed;
+        exCategory.value   = def?.category  || 'push';
+        exEquipment.value  = def?.equipment || 'barbell';
+        exPattern.value    = def?.pattern   || 'other';
+        exTracking.value   = def?.tracking  || 'weighted';
+        exBwInput.value    = def?.bwFraction ?? 0.70;
+        exBwGroup.classList.toggle('hidden', exTracking.value !== 'bodyweight');
+        exModal.classList.remove('hidden');
+    }
+    function closeExerciseModal() { exModal.classList.add('hidden'); }
+
+    document.getElementById('ex-cancel').addEventListener('click', closeExerciseModal);
+    exModal.addEventListener('click', (e) => { if (e.target === exModal) closeExerciseModal(); });
+    document.getElementById('btn-add-exercise').addEventListener('click', () => openExerciseModal(null));
+
+    document.getElementById('ex-save').addEventListener('click', async () => {
+        const name = exNameInput.value.trim();
+        if (!name) { alert('Please enter a name.'); return; }
+
+        const def = {
+            name,
+            category:  exCategory.value,
+            equipment: exEquipment.value,
+            pattern:   exPattern.value,
+            tracking:  exTracking.value,
+        };
+        if (def.tracking === 'bodyweight') def.bwFraction = parseFloat(exBwInput.value) || 1;
+
+        // If the name changed during an edit, remove the old record.
+        if (exEditingOriginalName && exEditingOriginalName !== name)
+            await DB.deleteExercise(exEditingOriginalName);
+
+        await DB.upsertExercise(def);
+        await loadExerciseDefs();
+        await refreshExerciseCache();
+        closeExerciseModal();
+        renderManageList();
+
+        // If we came from the log form, select the new exercise and adapt the form.
+        if (!exEditingOriginalName || exEditingOriginalName === name) {
+            const item = allExercises.find(e => e.name === name) || { name, def };
+            if (document.getElementById('view-log').classList.contains('active') ||
+                !document.getElementById('view-log').classList.contains('hidden')) {
+                selectExercise(item);
+            }
+        }
+    });
+
+    // ── Exercise manage list (Settings/Backup view) ──────────────────────────
+    async function renderManageList() {
+        const list = document.getElementById('exercise-manage-list');
+        const defs = await DB.getAllExercises();
+        list.innerHTML = '';
+        defs.forEach(def => {
+            const item = document.createElement('div');
+            item.className = 'exercise-manage-item';
+            const bw = def.tracking === 'bodyweight' ? ` · ${def.bwFraction ?? 1}×BW` : '';
+            item.innerHTML = `
+                <div>
+                    <div>${def.name}</div>
+                    <div class="ex-meta">${def.category} · ${def.equipment} · ${def.tracking}${bw}</div>
+                </div>
+                <div class="ex-actions">
+                    <button class="ex-edit">Edit</button>
+                    <button class="ex-del">Delete</button>
+                </div>`;
+            item.querySelector('.ex-edit').addEventListener('click', () => openExerciseModal(def));
+            item.querySelector('.ex-del').addEventListener('click', async () => {
+                if (confirm(`Delete the "${def.name}" exercise definition? (Logged sets are kept.)`)) {
+                    await DB.deleteExercise(def.name);
+                    await loadExerciseDefs();
+                    renderManageList();
+                }
+            });
+            list.appendChild(item);
+        });
+    }
 
     // =============================================
     // 6. NAVIGATION
@@ -622,7 +1139,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById(btn.dataset.target).classList.remove('hidden');
 
             if (btn.dataset.target === 'view-history') loadHistory();
-            if (btn.dataset.target === 'view-analysis') loadAnalysis(); 
+            if (btn.dataset.target === 'view-analysis') {
+                loadAnalysis();
+                if (analysisMode === 'muscles') renderMuscleMap(musclePeriod);
+            }
+            if (btn.dataset.target === 'view-backup') renderManageList();
         });
     });
 });

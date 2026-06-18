@@ -39,24 +39,41 @@
                 </div>
                 
                 <div class="row">
-                    <div class="input-group">
-                        <label>Weight (lbs)</label>
+                    <div class="input-group" id="group-weight">
+                        <label id="weight-label">Weight (lbs)</label>
                         <div class="stepper-container">
                             <button type="button" class="stepper-btn" onclick="step('weight', -2.5)">-</button>
-                            <input type="number" id="weight" step="0.5" required placeholder="0">
+                            <input type="number" id="weight" step="0.5" placeholder="0">
                             <button type="button" class="stepper-btn" onclick="step('weight', 2.5)">+</button>
                         </div>
                     </div>
-                    <div class="input-group">
+                    <div class="input-group" id="group-reps">
                         <label>Reps</label>
                         <div class="stepper-container">
                             <button type="button" class="stepper-btn" onclick="step('reps', -1)">-</button>
-                            <input type="number" id="reps" required placeholder="0">
+                            <input type="number" id="reps" placeholder="0">
                             <button type="button" class="stepper-btn" onclick="step('reps', 1)">+</button>
                         </div>
                     </div>
+                    <div class="input-group hidden" id="group-duration">
+                        <label>Duration (sec)</label>
+                        <div class="stepper-container">
+                            <button type="button" class="stepper-btn" onclick="step('duration', -5)">-</button>
+                            <input type="number" id="duration" placeholder="0">
+                            <button type="button" class="stepper-btn" onclick="step('duration', 5)">+</button>
+                        </div>
+                    </div>
                 </div>
-            
+
+                <div class="input-group hidden" id="group-band">
+                    <label>Band level</label>
+                    <div class="segmented" id="band-segmented">
+                        <button type="button" class="seg-btn" data-band="light">Light</button>
+                        <button type="button" class="seg-btn active" data-band="medium">Medium</button>
+                        <button type="button" class="seg-btn" data-band="heavy">Heavy</button>
+                    </div>
+                </div>
+
                 <div class="input-group">
                     <label for="notes">Notes (optional)</label>
                     <input type="text" id="notes" autocomplete="off" placeholder="Felt heavy...">
@@ -81,7 +98,18 @@
 
         <section id="view-backup" class="view hidden">
             <div class="backup-container">
-                <h2>Export Data</h2>
+                <h2>Settings</h2>
+                <div class="input-group">
+                    <label for="bodyweight">Bodyweight (lbs)</label>
+                    <input type="number" id="bodyweight" step="0.5" placeholder="e.g. 175">
+                    <small style="color:var(--text-secondary)">Used to estimate strength on bodyweight exercises (pushups, pull-ups…).</small>
+                </div>
+
+                <h2 style="margin-top:24px;">Exercises</h2>
+                <button id="btn-add-exercise" class="btn-secondary">+ New Exercise</button>
+                <div id="exercise-manage-list" class="exercise-manage-list"></div>
+
+                <h2 style="margin-top:24px;">Export Data</h2>
                 <p>Save your workout history locally.</p>
                 <button id="btn-export-json" class="btn-secondary">Export JSON</button>
                 <button id="btn-export-csv" class="btn-secondary">Export CSV</button>
@@ -89,19 +117,88 @@
         </section>
         <section id="view-analysis" class="view hidden">
             <div class="analysis-container">
-                <div class="input-group">
-                    <label for="analysis-exercise">Exercise</label>
-                    <select id="analysis-exercise" class="analysis-select">
-                        <option value="">Select an exercise…</option>
-                    </select>
+                <!-- Mode toggle: per-exercise chart vs muscle map -->
+                <div class="segmented" id="analysis-mode">
+                    <button type="button" class="seg-btn active" data-mode="exercise">Exercise</button>
+                    <button type="button" class="seg-btn" data-mode="muscles">Muscles</button>
                 </div>
-                <div id="analysis-pr" class="pr-card hidden"></div>
-                <div class="chart-wrap">
-                    <canvas id="analysis-chart"></canvas>
+
+                <div id="analysis-exercise-mode">
+                    <div class="input-group">
+                        <label for="analysis-exercise">Exercise</label>
+                        <select id="analysis-exercise" class="analysis-select">
+                            <option value="">Select an exercise…</option>
+                        </select>
+                    </div>
+                    <div id="analysis-pr" class="pr-card hidden"></div>
+                    <div class="chart-wrap">
+                        <canvas id="analysis-chart"></canvas>
+                    </div>
+                </div>
+
+                <div id="analysis-muscle-mode" class="hidden">
+                    <div class="filter-chips" id="muscle-period">
+                        <div class="chip" data-days="7">7d</div>
+                        <div class="chip active" data-days="30">30d</div>
+                        <div class="chip" data-days="90">90d</div>
+                        <div class="chip" data-days="0">All</div>
+                    </div>
+                    <div class="heat-legend">
+                        <span class="legend-item"><span class="legend-swatch" style="background:#ff6b6b"></span>Push</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#4dabf7"></span>Pull</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#69db7c"></span>Legs</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background:#b197fc"></span>Core</span>
+                    </div>
+                    <div class="body-views">
+                        <svg id="body-front" class="body-svg" viewBox="0 0 724 1448" preserveAspectRatio="xMidYMid meet" aria-label="Front muscles"></svg>
+                        <svg id="body-back" class="body-svg" viewBox="724 0 724 1448" preserveAspectRatio="xMidYMid meet" aria-label="Back muscles"></svg>
+                    </div>
+                    <div id="muscle-tooltip" class="muscle-tooltip hidden"></div>
                 </div>
             </div>
         </section>
     </main>
+
+    <!-- Add / edit exercise modal -->
+    <div id="exercise-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 id="exercise-modal-title">New Exercise</h2>
+            <div class="input-group">
+                <label for="ex-name">Name</label>
+                <input type="text" id="ex-name" autocomplete="off" placeholder="e.g. Cable Crossover">
+            </div>
+            <div class="input-group">
+                <label for="ex-category">Category</label>
+                <select id="ex-category" class="analysis-select">
+                    <option value="push">Push</option>
+                    <option value="pull">Pull</option>
+                    <option value="legs">Legs</option>
+                    <option value="core">Core</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="ex-equipment">Equipment</label>
+                <select id="ex-equipment" class="analysis-select"></select>
+            </div>
+            <div class="input-group">
+                <label for="ex-pattern">Movement pattern</label>
+                <select id="ex-pattern" class="analysis-select"></select>
+            </div>
+            <div class="input-group">
+                <label for="ex-tracking">Tracking type</label>
+                <select id="ex-tracking" class="analysis-select"></select>
+            </div>
+            <div class="input-group hidden" id="ex-bwfraction-group">
+                <label for="ex-bwfraction">Bodyweight load fraction</label>
+                <input type="number" id="ex-bwfraction" step="0.05" min="0" max="1.5" placeholder="0.70">
+                <small style="color:var(--text-secondary)">Fraction of your bodyweight this move loads (pushups ≈ 0.70, pull-ups = 1.00).</small>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" id="ex-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="ex-save">Save</button>
+            </div>
+        </div>
+    </div>
 
     <nav class="bottom-nav">
         <button class="nav-btn active" data-target="view-log" data-title="Log Workout">Log</button>
@@ -110,6 +207,7 @@
         <button class="nav-btn" data-target="view-backup" data-title="Backup & Export">Backup</button>
     </nav>
     <script src="js/exercises.js"></script>
+    <script src="js/muscles.js"></script>
     <script src="js/db.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/export.js"></script>
