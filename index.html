@@ -213,9 +213,19 @@
     <script src="js/export.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('service-worker.js')
-                .then(reg => console.log('SW registered!', reg))
-                .catch(err => console.error('SW sync failed!', err));
+            // updateViaCache:'none' = always re-check the SW script over the network
+            // (GitHub Pages otherwise HTTP-caches it and delays update detection).
+            navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' })
+                .then(reg => { reg.update(); })
+                .catch(err => console.error('SW registration failed!', err));
+
+            // When a new worker takes control, reload once so the page runs fresh code.
+            let reloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (reloading) return;
+                reloading = true;
+                location.reload();
+            });
         }
     </script>
 </body>
