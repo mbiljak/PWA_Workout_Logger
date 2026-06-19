@@ -137,12 +137,10 @@ document.addEventListener('DOMContentLoaded', () => {
         dropdown.innerHTML = '';
 
         if (matches.length === 0) {
+            // New exercises are added only via Settings → + New Exercise, not here.
             const empty = document.createElement('div');
             empty.className = 'autocomplete-empty';
-            empty.textContent = q ? `+ Add "${q}" as a new exercise` : 'No exercises yet — tap to add one';
-            const openAdd = (e) => { e.preventDefault(); closeDropdown(); openExerciseModal(null, q); };
-            empty.addEventListener('touchend', openAdd);
-            empty.addEventListener('mousedown', openAdd);
+            empty.textContent = q ? 'No matches — add it in Settings → Exercises' : 'No exercises yet — add one in Settings';
             dropdown.appendChild(empty);
         } else {
             matches.forEach(item => {
@@ -244,9 +242,11 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', pick);
     });
 
-    // Open on focus (show full list)
+    // Tapping the field clears it so you can search from scratch immediately,
+    // and shows the full list.
     exerciseInput.addEventListener('focus', () => {
-        renderDropdown(exerciseInput.value);
+        exerciseInput.value = '';
+        renderDropdown('');
     });
 
     // Filter as user types

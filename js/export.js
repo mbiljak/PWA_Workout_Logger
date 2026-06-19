@@ -1,8 +1,15 @@
 document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-export-json').addEventListener('click', async () => {
-        const sets = await DB.getAllSets();
-        const dataStr = JSON.stringify(sets, null, 2);
-        downloadFile(dataStr, 'workout-backup.json', 'application/json');
+        // Full backup: logged sets AND exercise definitions (incl. user-created ones),
+        // plus bodyweight settings, so nothing is lost on restore.
+        const backup = {
+            exportedAt: new Date().toISOString(),
+            sets: await DB.getAllSets(),
+            exercises: await DB.getAllExercises(),
+            bodyweight: localStorage.getItem('bodyweight') || null,
+            bodyweight_log: localStorage.getItem('bodyweight_log') || null,
+        };
+        downloadFile(JSON.stringify(backup, null, 2), 'workout-backup.json', 'application/json');
     });
 
     document.getElementById('btn-export-csv').addEventListener('click', async () => {
