@@ -112,13 +112,3 @@ function getCategory(exerciseName) {
 function getDef(exerciseName) {
     return EXERCISE_DEFS[exerciseName] ?? null;
 }
-
-// Given an array of exercise names, returns the dominant category (or 'mixed')
-function sessionCategory(names) {
-    const counts = {push:0, pull:0, legs:0, core:0};
-    names.forEach(n => { const c = getCategory(n); if (c) counts[c]++; });
-    const top = Object.entries(counts).sort((a,b) => b[1]-a[1]);
-    if (top[0][1] === 0) return null;
-    if (top[0][1] === top[1][1] && top[1][1] > 0) return 'mixed';
-    return top[0][0];
-}

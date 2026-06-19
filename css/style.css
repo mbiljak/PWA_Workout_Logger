@@ -301,7 +301,7 @@ input::-webkit-inner-spin-button {
 .heat-months { display:grid; grid-auto-flow:column; grid-auto-columns:13px; gap:3px; margin-bottom:4px; }
 .heat-months span { font-size:9px; color:var(--text-secondary); white-space:nowrap; overflow:visible; }
 .heatmap { display:grid; grid-template-rows:repeat(7,13px); grid-auto-flow:column; grid-auto-columns:13px; gap:3px; }
-.heat-cell { width:13px; height:13px; border-radius:2px; background:#2c2c2c; cursor:pointer; transition:opacity 0.15s; }
+.heat-cell { position:relative; width:13px; height:13px; border-radius:2px; background:#2c2c2c; cursor:pointer; transition:opacity 0.15s; }
 .heat-cell:active { opacity: 0.6; }
 .heat-cell.selected { outline: 2px solid #fff; outline-offset: 1px; }
 .heat-cell.heat-today { box-shadow: 0 0 0 1.5px var(--accent-color); }
@@ -311,6 +311,19 @@ input::-webkit-inner-spin-button {
 .heat-legs  { background: #1e8449; }
 .heat-core  { background: #8e44ad; }
 .heat-mixed { background: #666; }
+
+/* GTG (greasing the groove) days: a tinted dot on an unfilled cell, so sparse
+   work never looks like a full session. Dot color is set inline per dominant cat. */
+.heat-cell.heat-gtg::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--gtg-dot, rgba(255,255,255,0.9));
+    pointer-events: none;
+}
 
 /* Legend */
 .heat-legend { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; padding:0 4px; }
@@ -534,3 +547,62 @@ input::-webkit-inner-spin-button {
     padding: 4px;
 }
 .exercise-manage-item .ex-actions .ex-del { color: var(--danger-color); }
+
+/* ── Legend swatches ─────────────────────────────────────────────────────── */
+.legend-mixed-swatch {
+    background: linear-gradient(135deg, #c0392b 25%, #2471a3 25%, #2471a3 50%, #1e8449 50%, #1e8449 75%, #8e44ad 75%);
+}
+.legend-gtg-swatch {
+    background: #2c2c2c;
+    position: relative;
+}
+.legend-gtg-swatch::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; height: 6px;
+    background: rgba(255,255,255,0.9);
+    border-radius: 50%;
+}
+
+/* ── GTG tag pill ───────────────────────────────────────────────────────────  */
+.tag-gtg {
+    display: inline-block;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: #3a3a1a;
+    color: #c8b400;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* ── GTG session card (all sets were GTG) ────────────────────────────────── */
+.session-card[data-gtg="true"] { opacity: 0.8; border-left-style: dashed !important; }
+
+/* ── Mixed-category gradient left border ─────────────────────────────────── */
+.session-card { position: relative; }
+.session-mixed-gradient { border-left: none !important; }
+.session-mixed-gradient::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+    background: var(--mix-gradient, #888);
+}
+
+/* ── Input validation error ─────────────────────────────────────────────────  */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25%       { transform: translateX(-6px); }
+    75%       { transform: translateX(6px); }
+}
+.input-error {
+    border-color: var(--danger-color) !important;
+    animation: shake 0.3s ease;
+}
