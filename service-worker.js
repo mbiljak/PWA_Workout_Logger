@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workout-pwa-v8'; // always increment for official updates
+const CACHE_NAME = 'workout-pwa-v10'; // always increment for official updates
 const ASSETS = [
     './',
     './index.html',
@@ -19,7 +19,7 @@ const ASSETS = [
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then(cache => cache.addAll(ASSETS))
+            .then(cache => cache.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
             .then(() => self.skipWaiting())
     );
 });
@@ -43,8 +43,10 @@ self.addEventListener('fetch', event => {
     const sameOrigin = new URL(request.url).origin === self.location.origin;
 
     if (sameOrigin) {
+        // `cache: 'reload'` bypasses the browser's HTTP cache so "network-first"
+        // genuinely hits the origin (GitHub Pages sends max-age=600 otherwise).
         event.respondWith(
-            fetch(request)
+            fetch(request, { cache: 'reload' })
                 .then(response => {
                     const copy = response.clone();
                     caches.open(CACHE_NAME).then(cache => cache.put(request, copy));

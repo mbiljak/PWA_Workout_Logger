@@ -23,6 +23,30 @@ const DB = {
         return await db.sets.add(set);
     },
 
+    async updateSet(id, changes) {
+        return await db.sets.update(id, changes);
+    },
+
+    // Full replace from a JSON backup (object form, or a legacy bare sets array).
+    async restore(backup) {
+        const sets = Array.isArray(backup) ? backup : (backup.sets || []);
+        const exercises = (!Array.isArray(backup) && backup.exercises) || null;
+        await db.transaction('rw', db.sets, db.exercises, async () => {
+            await db.sets.clear();
+            if (sets.length) await db.sets.bulkPut(sets);
+            if (exercises && exercises.length) {
+                await db.exercises.clear();
+                await db.exercises.bulkPut(exercises);
+                localStorage.setItem('exercises_seeded', 'true'); // don't re-seed over a restore
+            }
+        });
+        if (!Array.isArray(backup)) {
+            if (backup.bodyweight != null) localStorage.setItem('bodyweight', backup.bodyweight);
+            if (backup.bodyweight_log != null) localStorage.setItem('bodyweight_log', backup.bodyweight_log);
+        }
+        return { sets: sets.length, exercises: exercises ? exercises.length : 0 };
+    },
+
     async getTodaySets() {
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);

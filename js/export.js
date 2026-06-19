@@ -38,6 +38,27 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadFile(csvRows.join('\n'), 'workout-backup.csv', 'text/csv');
     });
 
+    // ── Restore from JSON backup ──────────────────────────────────────────────
+    const importFile = document.getElementById('import-file');
+    document.getElementById('btn-import-json').addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', async () => {
+        const file = importFile.files && importFile.files[0];
+        importFile.value = ''; // allow re-selecting the same file later
+        if (!file) return;
+        let parsed;
+        try {
+            parsed = JSON.parse(await file.text());
+        } catch {
+            return alert('Not a valid backup file.');
+        }
+        const hasSets = Array.isArray(parsed) || Array.isArray(parsed.sets);
+        if (!hasSets) return alert('Not a valid backup file.');
+        if (!confirm('Replace ALL current data with this backup? Export first if unsure.')) return;
+        const { sets } = await DB.restore(parsed);
+        alert(`Restored ${sets} set${sets !== 1 ? 's' : ''}.`);
+        location.reload();
+    });
+
     function downloadFile(content, fileName, mimeType) {
         const blob = new Blob([content], { type: mimeType });
         const url = URL.createObjectURL(blob);

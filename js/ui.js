@@ -3,7 +3,8 @@ window.step = (id, amount) => {
     const el = document.getElementById(id);
     const currentVal = parseFloat(el.value) || 0;
     const newVal = currentVal + amount;
-    el.value = (id === 'reps' || id === 'duration') ? Math.max(0, newVal) : newVal;
+    const clampZero = id === 'reps' || id === 'duration' || id === 'set-reps' || id === 'set-duration';
+    el.value = clampZero ? Math.max(0, newVal) : newVal;
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -637,17 +638,88 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="set-time">${time}</div>
         `;
 
-        li.addEventListener('click', async () => {
-            if (confirm(`Delete this ${set.exercise} set?`)) {
-                await DB.deleteSet(set.id);
-                loadTodaySets();
-                if (!document.getElementById('view-history').classList.contains('hidden')) {
-                    loadHistory();
-                }
-            }
-        });
+        li.addEventListener('click', () => openEditSet(set));
         return li;
     }
+
+    // Refresh the views that show logged sets (after edit/delete).
+    function refreshSetViews() {
+        loadTodaySets();
+        if (!document.getElementById('view-history').classList.contains('hidden')) loadHistory();
+    }
+
+    // ── EDIT LOGGED SET MODAL ─────────────────────────────────────────────────
+    const setModal      = document.getElementById('set-modal');
+    const setWeightInput= document.getElementById('set-weight');
+    const setRepsInput  = document.getElementById('set-reps');
+    const setDurInput   = document.getElementById('set-duration');
+    const setNotesInput = document.getElementById('set-notes');
+    const setWeightLabel= document.getElementById('set-weight-label');
+    const setBandSeg    = document.getElementById('set-band-segmented');
+    let   editingSetId  = null;
+    let   editingTracking = 'weighted';
+    let   editingBand   = 'medium';
+
+    function openEditSet(set) {
+        editingSetId = set.id;
+        const def = getDef(set.exercise);
+        editingTracking = def?.tracking || 'weighted';
+        document.getElementById('set-modal-title').textContent = set.exercise;
+
+        const isWeighted = editingTracking === 'weighted';
+        const isBanded   = editingTracking === 'banded';
+        const isTimed    = editingTracking === 'timed';
+        document.getElementById('set-group-weight').classList.toggle('hidden', isBanded);
+        document.getElementById('set-group-reps').classList.toggle('hidden', isTimed);
+        document.getElementById('set-group-duration').classList.toggle('hidden', !isTimed);
+        document.getElementById('set-group-band').classList.toggle('hidden', !isBanded);
+        setWeightLabel.textContent = isWeighted ? 'Weight (lbs)' : 'Added weight (lbs)';
+
+        setWeightInput.value = set.weight ?? 0;
+        setRepsInput.value   = set.reps ?? 0;
+        setDurInput.value    = set.duration ?? 0;
+        setNotesInput.value  = set.notes || '';
+        editingBand = set.bandLevel || 'medium';
+        setBandSeg.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.band === editingBand));
+
+        setModal.classList.remove('hidden');
+    }
+    function closeEditSet() { setModal.classList.add('hidden'); editingSetId = null; }
+
+    setBandSeg.querySelectorAll('.seg-btn').forEach(btn => {
+        const pick = (e) => {
+            e.preventDefault();
+            editingBand = btn.dataset.band;
+            setBandSeg.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+        };
+        btn.addEventListener('touchend', pick);
+        btn.addEventListener('click', pick);
+    });
+
+    document.getElementById('set-cancel').addEventListener('click', closeEditSet);
+    setModal.addEventListener('click', (e) => { if (e.target === setModal) closeEditSet(); });
+
+    document.getElementById('set-save').addEventListener('click', async () => {
+        if (editingSetId == null) return;
+        const changes = {
+            weight: parseFloat(setWeightInput.value) || 0,
+            reps:   parseInt(setRepsInput.value) || 0,
+            notes:  setNotesInput.value.trim(),
+        };
+        if (editingTracking === 'timed')  changes.duration  = parseInt(setDurInput.value) || 0;
+        if (editingTracking === 'banded') changes.bandLevel = editingBand;
+        await DB.updateSet(editingSetId, changes);
+        closeEditSet();
+        refreshSetViews();
+    });
+
+    document.getElementById('set-delete').addEventListener('click', async () => {
+        if (editingSetId == null) return;
+        if (!confirm('Delete this set?')) return;
+        await DB.deleteSet(editingSetId);
+        closeEditSet();
+        refreshSetViews();
+    });
         // ── ANALYSIS TAB ─────────────────────────────────────────────────────────────
     let analysisChart = null;
 

@@ -113,6 +113,11 @@
                 <p>Save your workout history locally.</p>
                 <button id="btn-export-json" class="btn-secondary">Export JSON</button>
                 <button id="btn-export-csv" class="btn-secondary">Export CSV</button>
+
+                <h2 style="margin-top:24px;">Restore</h2>
+                <p style="color:var(--text-secondary)">Loading a JSON backup <strong>replaces all current data</strong>. Export first if unsure.</p>
+                <button id="btn-import-json" class="btn-secondary">Import / Restore Backup</button>
+                <input type="file" id="import-file" accept="application/json,.json" style="display:none">
             </div>
         </section>
         <section id="view-analysis" class="view hidden">
@@ -196,6 +201,56 @@
             <div class="modal-actions">
                 <button type="button" class="btn-secondary" id="ex-cancel">Cancel</button>
                 <button type="button" class="btn-primary" id="ex-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit logged-set modal -->
+    <div id="set-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2 id="set-modal-title">Edit Set</h2>
+            <div class="row">
+                <div class="input-group" id="set-group-weight">
+                    <label id="set-weight-label">Weight (lbs)</label>
+                    <div class="stepper-container">
+                        <button type="button" class="stepper-btn" onclick="step('set-weight', -2.5)">-</button>
+                        <input type="number" id="set-weight" step="0.5" placeholder="0">
+                        <button type="button" class="stepper-btn" onclick="step('set-weight', 2.5)">+</button>
+                    </div>
+                </div>
+                <div class="input-group" id="set-group-reps">
+                    <label>Reps</label>
+                    <div class="stepper-container">
+                        <button type="button" class="stepper-btn" onclick="step('set-reps', -1)">-</button>
+                        <input type="number" id="set-reps" placeholder="0">
+                        <button type="button" class="stepper-btn" onclick="step('set-reps', 1)">+</button>
+                    </div>
+                </div>
+                <div class="input-group hidden" id="set-group-duration">
+                    <label>Duration (sec)</label>
+                    <div class="stepper-container">
+                        <button type="button" class="stepper-btn" onclick="step('set-duration', -5)">-</button>
+                        <input type="number" id="set-duration" placeholder="0">
+                        <button type="button" class="stepper-btn" onclick="step('set-duration', 5)">+</button>
+                    </div>
+                </div>
+            </div>
+            <div class="input-group hidden" id="set-group-band">
+                <label>Band level</label>
+                <div class="segmented" id="set-band-segmented">
+                    <button type="button" class="seg-btn" data-band="light">Light</button>
+                    <button type="button" class="seg-btn active" data-band="medium">Medium</button>
+                    <button type="button" class="seg-btn" data-band="heavy">Heavy</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label for="set-notes">Notes</label>
+                <input type="text" id="set-notes" autocomplete="off" placeholder="optional">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-danger" id="set-delete">Delete</button>
+                <button type="button" class="btn-secondary" id="set-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="set-save">Save</button>
             </div>
         </div>
     </div>
