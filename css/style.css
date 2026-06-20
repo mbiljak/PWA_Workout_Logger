@@ -470,6 +470,14 @@ input::-webkit-inner-spin-button {
     position: relative;
 }
 
+.pattern-breakdown { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.pattern-breakdown-title { font-size: 0.75rem; color: var(--text-secondary); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.pattern-bar-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.pattern-bar-name { flex: 0 0 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pattern-bar-track { flex: 1; height: 8px; background: #ffffff12; border-radius: 4px; overflow: hidden; }
+.pattern-bar-fill { display: block; height: 100%; border-radius: 4px; }
+.pattern-bar-pct { flex: 0 0 34px; text-align: right; color: var(--text-secondary); }
+
 .analysis-empty {
     padding: 40px 20px;
     text-align: center;

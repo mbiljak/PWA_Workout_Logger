@@ -125,6 +125,7 @@
                 <!-- Mode toggle: per-exercise chart vs muscle map -->
                 <div class="segmented" id="analysis-mode">
                     <button type="button" class="seg-btn active" data-mode="exercise">Exercise</button>
+                    <button type="button" class="seg-btn" data-mode="patterns">Patterns</button>
                     <button type="button" class="seg-btn" data-mode="muscles">Muscles</button>
                 </div>
 
@@ -139,6 +140,20 @@
                     <div class="chart-wrap">
                         <canvas id="analysis-chart"></canvas>
                     </div>
+                </div>
+
+                <div id="analysis-pattern-mode" class="hidden">
+                    <div class="input-group">
+                        <label for="analysis-pattern">Movement pattern</label>
+                        <select id="analysis-pattern" class="analysis-select">
+                            <option value="">Select a movement pattern…</option>
+                        </select>
+                    </div>
+                    <div id="pattern-pr" class="pr-card hidden"></div>
+                    <div class="chart-wrap">
+                        <canvas id="pattern-chart"></canvas>
+                    </div>
+                    <div id="pattern-breakdown" class="pattern-breakdown"></div>
                 </div>
 
                 <div id="analysis-muscle-mode" class="hidden">

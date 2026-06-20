@@ -1031,6 +1031,156 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('analysis-exercise')
         .addEventListener('change', e => renderAnalysis(e.target.value));
 
+    // ── PATTERN ANALYSIS ─────────────────────────────────────────────────────────
+    // Aggregates every logged set whose exercise shares a movement pattern, so a
+    // machine row and a cable row both roll up into "Horizontal Pull". Lets you
+    // track a pattern's progression across exercise variations.
+    let patternChart = null;
+
+    const patternLabel = (p) =>
+        p.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    async function loadPatternAnalysis() {
+        const select = document.getElementById('analysis-pattern');
+        const prev   = select.value;
+        const all    = await DB.getAllSets();
+        const present = new Set();
+        all.forEach(s => { const d = getDef(s.exercise); if (d && d.pattern) present.add(d.pattern); });
+        const ordered = MOVEMENT_PATTERNS.filter(p => present.has(p));
+        select.innerHTML = '<option value="">Select a movement pattern…</option>';
+        ordered.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = patternLabel(p);
+            if (p === prev) opt.selected = true;
+            select.appendChild(opt);
+        });
+        if (prev && present.has(prev)) renderPatternAnalysis(prev);
+    }
+
+    async function renderPatternAnalysis(pattern) {
+        const prCard      = document.getElementById('pattern-pr');
+        const canvas      = document.getElementById('pattern-chart');
+        const breakdownEl = document.getElementById('pattern-breakdown');
+        if (!pattern) {
+            prCard.className = 'pr-card hidden';
+            breakdownEl.innerHTML = '';
+            if (patternChart) { patternChart.destroy(); patternChart = null; }
+            return;
+        }
+
+        const all  = await DB.getAllSets();
+        const sets = all.filter(s => { const d = getDef(s.exercise); return d && d.pattern === pattern; });
+        if (!sets.length) {
+            prCard.className = 'pr-card hidden';
+            breakdownEl.innerHTML = '';
+            if (patternChart) { patternChart.destroy(); patternChart = null; }
+            return;
+        }
+
+        const sessionMap = {};
+        sets.forEach(s => {
+            const key = new Date(s.timestamp).toLocaleDateString();
+            if (!sessionMap[key]) sessionMap[key] = { timestamp: s.timestamp, sets: [] };
+            sessionMap[key].sets.push(s);
+        });
+        const sessions = Object.entries(sessionMap).sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const labels   = sessions.map(([, s]) =>
+            new Date(s.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+        const dated = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+        // e1RM is only meaningful for loaded sets; 0 means "not applicable".
+        const e1rmOf = (s) => {
+            const d = getDef(s.exercise);
+            const t = d?.tracking || 'weighted';
+            if (t === 'weighted' || (t === 'bodyweight' && (s.weight || 0) > 0))
+                return e1rm(loadOf(s, d, bodyweightAt(s.timestamp)), s.reps);
+            return 0;
+        };
+        const anyE1rm = sets.some(s => e1rmOf(s) > 0);
+
+        const barData = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + setVolume(x), 0)));
+        let lineData, lineLabel, lineAxis, prHtml;
+        if (anyE1rm) {
+            lineData  = sessions.map(([, s]) => {
+                const vals = s.sets.map(e1rmOf).filter(v => v > 0);
+                return vals.length ? Math.round(Math.max(...vals)) : null;
+            });
+            lineLabel = 'Best e1RM (lbs)'; lineAxis = 'e1RM (lbs)';
+            const prSet = sets.reduce((b, s) => e1rmOf(s) > e1rmOf(b) ? s : b);
+            prHtml = `<span class="pr-set">${prSet.exercise} · ${formatSet(prSet)}</span>
+                      <span class="pr-e1rm">e1RM: ${Math.round(e1rmOf(prSet))} lbs · ${dated(prSet.timestamp)}</span>`;
+        } else {
+            lineData  = sessions.map(([, s]) => s.sets.reduce((a, x) => a + (x.reps || 0), 0));
+            lineLabel = 'Total reps'; lineAxis = 'Reps';
+            const prSet = sets.reduce((b, s) => setVolume(s) > setVolume(b) ? s : b);
+            prHtml = `<span class="pr-set">${prSet.exercise} · ${formatSet(prSet)}</span>
+                      <span class="pr-e1rm">Top volume set · ${dated(prSet.timestamp)}</span>`;
+        }
+
+        prCard.className = 'pr-card';
+        prCard.innerHTML = `<span class="pr-label">🏆 ${patternLabel(pattern)} PR</span>${prHtml}`;
+
+        // Dominant category drives the accent (a pattern can span categories).
+        const catCount = {};
+        sets.forEach(s => { const c = getCategory(s.exercise); if (c) catCount[c] = (catCount[c] || 0) + 1; });
+        const domCat = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const accent = domCat === 'push' ? '#ff6b6b' : domCat === 'pull' ? '#4dabf7'
+                     : domCat === 'legs' ? '#69db7c' : '#b197fc';
+
+        // Contributing-exercise volume share — the whole point of the pattern view.
+        const byEx = {};
+        sets.forEach(s => { byEx[s.exercise] = (byEx[s.exercise] || 0) + setVolume(s); });
+        const total = Object.values(byEx).reduce((a, b) => a + b, 0) || 1;
+        const rows  = Object.entries(byEx).sort((a, b) => b[1] - a[1]);
+        breakdownEl.innerHTML = `<div class="pattern-breakdown-title">Contributing exercises</div>` +
+            rows.map(([name, v]) => {
+                const pct = Math.round(v / total * 100);
+                return `<div class="pattern-bar-row">
+                            <span class="pattern-bar-name">${name}</span>
+                            <span class="pattern-bar-track"><span class="pattern-bar-fill" style="width:${pct}%;background:${accent}"></span></span>
+                            <span class="pattern-bar-pct">${pct}%</span>
+                        </div>`;
+            }).join('');
+
+        if (patternChart) { patternChart.destroy(); }
+        patternChart = new Chart(canvas, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'line', label: lineLabel, data: lineData,
+                        borderColor: accent, backgroundColor: accent + '22',
+                        fill: true, tension: 0.35, pointRadius: 4,
+                        pointBackgroundColor: accent, spanGaps: true,
+                        yAxisID: 'y', order: 1,
+                    },
+                    {
+                        type: 'bar', label: 'Volume (lbs)', data: barData,
+                        backgroundColor: '#ffffff12', borderColor: '#ffffff25',
+                        borderWidth: 1, yAxisID: 'y2', order: 2,
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } },
+                    tooltip: { backgroundColor: '#1e1e1e', titleColor: '#fff', bodyColor: '#aaa', borderColor: '#333', borderWidth: 1 }
+                },
+                scales: {
+                    x:  { ticks: { color: '#aaa', maxRotation: 45, font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+                    y:  { position: 'left',  title: { display: true, text: lineAxis, color: '#aaa', font: { size: 10 } }, ticks: { color: accent, font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+                    y2: { position: 'right', title: { display: true, text: 'Volume (lbs)', color: '#aaa', font: { size: 10 } }, ticks: { color: '#555', font: { size: 10 } }, grid: { drawOnChartArea: false } }
+                }
+            }
+        });
+    }
+
+    document.getElementById('analysis-pattern')
+        .addEventListener('change', e => renderPatternAnalysis(e.target.value));
+
     // ── MUSCLE MAP ───────────────────────────────────────────────────────────────
     const bodyFront   = document.getElementById('body-front');
     const bodyBack    = document.getElementById('body-back');
@@ -1115,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mode toggle (Exercise | Muscles)
     const exerciseModeEl = document.getElementById('analysis-exercise-mode');
+    const patternModeEl  = document.getElementById('analysis-pattern-mode');
     const muscleModeEl   = document.getElementById('analysis-muscle-mode');
     let   analysisMode   = 'exercise';
     document.querySelectorAll('#analysis-mode .seg-btn').forEach(btn => {
@@ -1122,10 +1273,11 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             analysisMode = btn.dataset.mode;
             document.querySelectorAll('#analysis-mode .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
-            const muscles = analysisMode === 'muscles';
-            exerciseModeEl.classList.toggle('hidden', muscles);
-            muscleModeEl.classList.toggle('hidden', !muscles);
-            if (muscles) renderMuscleMap(musclePeriod);
+            exerciseModeEl.classList.toggle('hidden', analysisMode !== 'exercise');
+            patternModeEl.classList.toggle('hidden', analysisMode !== 'patterns');
+            muscleModeEl.classList.toggle('hidden', analysisMode !== 'muscles');
+            if (analysisMode === 'patterns') loadPatternAnalysis();
+            if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
         };
         btn.addEventListener('click', pick);
     });
@@ -1278,7 +1430,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btn.dataset.target === 'view-history') loadHistory();
             if (btn.dataset.target === 'view-analysis') {
                 loadAnalysis();
-                if (analysisMode === 'muscles') renderMuscleMap(musclePeriod);
+                if (analysisMode === 'patterns') loadPatternAnalysis();
+                if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
             }
             if (btn.dataset.target === 'view-backup') renderManageList();
         });
