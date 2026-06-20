@@ -103,6 +103,25 @@ const DB = {
         return [...new Set(setsFromThatDay.map(s => s.exercise))];
     },
 
+    // Returns ALL sets (any exercise) from the most recent session day for `name`
+    // that is NOT today. Returning the full day lets callers detect interleaved
+    // exercises and avoid counting cross-exercise gaps as rest.
+    async getLastSessionAllSets(name) {
+        if (!name) return [];
+        const todayKey = new Date().toLocaleDateString();
+        const prevSet = await db.sets
+            .where('exercise').equals(name)
+            .reverse()
+            .filter(s => new Date(s.timestamp).toLocaleDateString() !== todayKey)
+            .first();
+        if (!prevSet) return [];
+        const day = new Date(prevSet.timestamp);
+        const startOfDay = new Date(day).setHours(0, 0, 0, 0);
+        const endOfDay   = new Date(day).setHours(23, 59, 59, 999);
+        const daySets = await db.sets.where('timestamp').between(startOfDay, endOfDay).toArray();
+        return daySets.sort((a, b) => a.timestamp - b.timestamp);
+    },
+
     // ── Exercise definitions ─────────────────────────────────────────────────
     async getAllExercises() {
         return await db.exercises.orderBy('name').toArray();

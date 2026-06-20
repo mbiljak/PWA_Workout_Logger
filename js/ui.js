@@ -162,6 +162,35 @@ function setVolume(s) {
     return loadOf(s, def, bodyweightAt(s.timestamp)) * (s.reps || 0);
 }
 
+// Average ms of estimated rest between consecutive sets of `exerciseName`.
+// The raw gap (timestamp[i+1] - timestamp[i]) includes both rest AND the time
+// to complete set[i+1], because sets are logged on completion. We subtract an
+// execution estimate from each gap: duration (seconds) for timed exercises, or
+// reps × 3s as a rough tempo estimate for everything else.
+// Gaps that span another exercise are excluded (those include work on a different
+// movement, not just rest).
+function avgIntraRestMs(allDaySets, exerciseName) {
+    const sorted = [...allDaySets].sort((a, b) => a.timestamp - b.timestamp);
+    const gaps = [];
+    let lastTs = null;
+    let interleaved = false;
+    for (const s of sorted) {
+        if (s.exercise === exerciseName) {
+            if (lastTs !== null && !interleaved) {
+                const execMs = (s.duration != null ? s.duration : (s.reps || 0) * 3) * 1000;
+                const restMs = Math.max(0, s.timestamp - lastTs - execMs);
+                gaps.push(restMs);
+            }
+            lastTs = s.timestamp;
+            interleaved = false;
+        } else if (lastTs !== null) {
+            interleaved = true;
+        }
+    }
+    if (!gaps.length) return null;
+    return gaps.reduce((a, b) => a + b, 0) / gaps.length;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -206,12 +235,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Rest Timer ───────────────────────────────────────────────────────────
     const restTimer    = document.getElementById('rest-timer');
     const timerDisplay = restTimer.querySelector('.timer-display');
+    const restHint     = document.getElementById('rest-hint');
     let   timerInterval = null;
     const MAX_REST_MS   = 6 * 60 * 1000;
     const WARN_MS       = 4 * 60 * 1000;
 
-    function startTimer(fromTimestamp) {
+    function startTimer(fromTimestamp, warnMs = WARN_MS) {
         clearInterval(timerInterval);
+        // Show the exercise-specific threshold so the user knows what they're being held to.
+        restHint.textContent = warnMs !== WARN_MS ? `avg ${fmtDuration(Math.round(warnMs / 1000))}` : '';
         function tick() {
             const elapsed = Date.now() - fromTimestamp;
             if (elapsed >= MAX_REST_MS) {
@@ -223,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const m    = String(Math.floor(secs / 60)).padStart(2, '0');
             const s    = String(secs % 60).padStart(2, '0');
             timerDisplay.textContent = `${m}:${s}`;
-            restTimer.classList.toggle('warn', elapsed >= WARN_MS);
+            restTimer.classList.toggle('warn', elapsed >= warnMs);
             restTimer.classList.remove('hidden');
         }
         tick();
@@ -232,8 +264,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function initTimer() {
         const sets = await DB.getTodaySets();
-        if (sets.length && (Date.now() - sets[0].timestamp) < MAX_REST_MS)
-            startTimer(sets[0].timestamp);
+        if (!sets.length || (Date.now() - sets[0].timestamp) >= MAX_REST_MS) return;
+        const lastSets   = await DB.getLastSessionAllSets(sets[0].exercise);
+        const customWarn = avgIntraRestMs(lastSets, sets[0].exercise) ?? WARN_MS;
+        startTimer(sets[0].timestamp, customWarn);
     }
     initTimer();
 
@@ -478,7 +512,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentTracking === 'banded') set.bandLevel = currentBand;
 
         await DB.addSet(set);
-        startTimer(Date.now());
+        const lastSets   = await DB.getLastSessionAllSets(set.exercise);
+        const customWarn = avgIntraRestMs(lastSets, set.exercise) ?? WARN_MS;
+        startTimer(Date.now(), customWarn);
 
         notesInput.value = '';
 
@@ -976,6 +1012,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         prCard.className = 'pr-card';
         prCard.innerHTML = `<span class="pr-label">🏆 PR Set</span>${prHtml}`;
+
+        // Avg rest from previous session (async — appended after chart renders).
+        DB.getLastSessionAllSets(exerciseName).then(lastSets => {
+            const avgMs = avgIntraRestMs(lastSets, exerciseName);
+            if (avgMs !== null) {
+                const restSpan = document.createElement('span');
+                restSpan.className = 'pr-rest';
+                restSpan.textContent = `⏱ Avg rest last session: ${fmtDuration(Math.round(avgMs / 1000))}`;
+                prCard.appendChild(restSpan);
+            }
+        });
 
         const cat    = getCategory(exerciseName);
         const accent = cat === 'push' ? '#ff6b6b' : cat === 'pull' ? '#4dabf7' : cat === 'legs' ? '#69db7c' : '#007bff';
