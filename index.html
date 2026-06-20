@@ -32,6 +32,7 @@
                         autocorrect="off"
                         autocapitalize="words"
                         spellcheck="false"
+                        enterkeyhint="search"
                         placeholder="e.g. Bench Press"
                     >
                     <!-- Custom dropdown — populated by JS -->
@@ -43,7 +44,7 @@
                         <label id="weight-label">Weight (lbs)</label>
                         <div class="stepper-container">
                             <button type="button" class="stepper-btn" onclick="step('weight', -2.5)">-</button>
-                            <input type="number" id="weight" step="0.5" placeholder="0">
+                            <input type="number" id="weight" step="0.5" inputmode="decimal" placeholder="0">
                             <button type="button" class="stepper-btn" onclick="step('weight', 2.5)">+</button>
                         </div>
                     </div>
@@ -51,7 +52,7 @@
                         <label>Reps</label>
                         <div class="stepper-container">
                             <button type="button" class="stepper-btn" onclick="step('reps', -1)">-</button>
-                            <input type="number" id="reps" placeholder="0">
+                            <input type="number" id="reps" inputmode="numeric" placeholder="0">
                             <button type="button" class="stepper-btn" onclick="step('reps', 1)">+</button>
                         </div>
                     </div>
@@ -59,7 +60,7 @@
                         <label>Duration (sec)</label>
                         <div class="stepper-container">
                             <button type="button" class="stepper-btn" onclick="step('duration', -5)">-</button>
-                            <input type="number" id="duration" placeholder="0">
+                            <input type="number" id="duration" inputmode="numeric" placeholder="0">
                             <button type="button" class="stepper-btn" onclick="step('duration', 5)">+</button>
                         </div>
                     </div>
@@ -76,7 +77,7 @@
 
                 <div class="input-group">
                     <label for="notes">Notes (optional)</label>
-                    <input type="text" id="notes" autocomplete="off" placeholder="Felt heavy...">
+                    <input type="text" id="notes" autocomplete="off" enterkeyhint="done" placeholder="Felt heavy...">
                 </div>
                 <button type="submit" class="btn-primary">Log Set</button>
             </form>
@@ -101,7 +102,7 @@
                 <h2>Settings</h2>
                 <div class="input-group">
                     <label for="bodyweight">Bodyweight (lbs)</label>
-                    <input type="number" id="bodyweight" step="0.5" placeholder="e.g. 175">
+                    <input type="number" id="bodyweight" step="0.5" inputmode="decimal" placeholder="e.g. 175">
                     <small style="color:var(--text-secondary)">Used to estimate strength on bodyweight exercises (pushups, pull-ups…).</small>
                 </div>
 
@@ -229,7 +230,7 @@
                     <label id="set-weight-label">Weight (lbs)</label>
                     <div class="stepper-container">
                         <button type="button" class="stepper-btn" onclick="step('set-weight', -2.5)">-</button>
-                        <input type="number" id="set-weight" step="0.5" placeholder="0">
+                        <input type="number" id="set-weight" step="0.5" inputmode="decimal" placeholder="0">
                         <button type="button" class="stepper-btn" onclick="step('set-weight', 2.5)">+</button>
                     </div>
                 </div>
@@ -237,7 +238,7 @@
                     <label>Reps</label>
                     <div class="stepper-container">
                         <button type="button" class="stepper-btn" onclick="step('set-reps', -1)">-</button>
-                        <input type="number" id="set-reps" placeholder="0">
+                        <input type="number" id="set-reps" inputmode="numeric" placeholder="0">
                         <button type="button" class="stepper-btn" onclick="step('set-reps', 1)">+</button>
                     </div>
                 </div>
@@ -245,7 +246,7 @@
                     <label>Duration (sec)</label>
                     <div class="stepper-container">
                         <button type="button" class="stepper-btn" onclick="step('set-duration', -5)">-</button>
-                        <input type="number" id="set-duration" placeholder="0">
+                        <input type="number" id="set-duration" inputmode="numeric" placeholder="0">
                         <button type="button" class="stepper-btn" onclick="step('set-duration', 5)">+</button>
                     </div>
                 </div>
@@ -260,7 +261,7 @@
             </div>
             <div class="input-group">
                 <label for="set-notes">Notes</label>
-                <input type="text" id="set-notes" autocomplete="off" placeholder="optional">
+                <input type="text" id="set-notes" autocomplete="off" enterkeyhint="done" placeholder="optional">
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn-danger" id="set-delete">Delete</button>

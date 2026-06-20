@@ -280,6 +280,12 @@ input::-webkit-inner-spin-button {
     flex-shrink: 0;
 }
 
+/* Inline "create new exercise" row */
+.autocomplete-create .autocomplete-item-name {
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
 /* "No results" empty state */
 .autocomplete-empty {
     padding: 14px 16px;

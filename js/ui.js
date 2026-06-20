@@ -281,10 +281,29 @@ document.addEventListener('DOMContentLoaded', () => {
         dropdown.innerHTML = '';
 
         if (matches.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'autocomplete-empty';
-            empty.textContent = q ? 'No matches — add it in Settings → Exercises' : 'No exercises yet — add one in Settings';
-            dropdown.appendChild(empty);
+            if (q) {
+                // Offer to create the typed exercise on the spot, so it gets a real
+                // definition (tracking/category) instead of becoming a free-typed set.
+                const create = document.createElement('div');
+                create.className = 'autocomplete-item autocomplete-create';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'autocomplete-item-name';
+                nameSpan.textContent = `➕ Create “${q}”`;
+                const hintSpan = document.createElement('span');
+                hintSpan.className = 'autocomplete-item-hint';
+                hintSpan.textContent = 'set tracking type';
+                create.append(nameSpan, hintSpan);
+
+                const fire = (e) => { e.preventDefault(); closeDropdown(); openExerciseModal(null, q); };
+                create.addEventListener('touchend', fire);
+                create.addEventListener('mousedown', fire);
+                dropdown.appendChild(create);
+            } else {
+                const empty = document.createElement('div');
+                empty.className = 'autocomplete-empty';
+                empty.textContent = 'No exercises yet — add one in Settings';
+                dropdown.appendChild(empty);
+            }
         } else {
             matches.forEach(item => {
                 const el = document.createElement('div');
@@ -362,8 +381,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exerciseInput.addEventListener('focus', () => {
-        exerciseInput.value = '';
-        renderDropdown('');
+        exerciseInput.select();   // typing replaces; tapping away keeps the value
+        renderDropdown('');       // still show the full list so you can switch exercises
     });
 
     exerciseInput.addEventListener('input', () => {
