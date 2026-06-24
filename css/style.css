@@ -19,7 +19,7 @@ body {
     background-color: var(--bg-color);
     color: var(--text-primary);
     /* Clears the fixed bottom nav (taller now) plus the iPhone home-bar inset */
-    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
     /* Prevent the iOS hold-and-swipe text/element highlight that interrupts flow */
     -webkit-user-select: none;
     user-select: none;
@@ -51,6 +51,14 @@ main {
 }
 
 .hidden { display: none !important; }
+
+.app-version {
+    margin-top: 28px;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
 
 /* Forms */
 form {
@@ -148,8 +156,9 @@ button {
     backdrop-filter: saturate(180%) blur(20px);
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     padding-top: 10px;
-    /* Extra breathing room so the bar clears the iPhone home-swipe indicator */
-    padding-bottom: calc(env(safe-area-inset-bottom) + 14px);
+    /* Extra breathing room so labels clear the iPhone home-swipe indicator.
+       max() guarantees a solid gap even on devices that report a small/zero inset. */
+    padding-bottom: max(28px, calc(env(safe-area-inset-bottom) + 22px));
     z-index: 20;
 }
 

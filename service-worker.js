@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workout-pwa-v17'; // always increment for official updates
+const CACHE_NAME = 'workout-pwa-v20'; // always increment for official updates
 const ASSETS = [
     './',
     './index.html',
@@ -16,6 +16,14 @@ const ASSETS = [
     'https://unpkg.com/dexie/dist/dexie.js',
     'https://cdn.jsdelivr.net/npm/chart.js'
 ];
+
+// Let the page ask which cache (i.e. which deploy) is actually serving it, so
+// Settings can show the live version and you can tell when an update landed.
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'GET_VERSION') {
+        event.ports[0]?.postMessage(CACHE_NAME);
+    }
+});
 
 self.addEventListener('install', event => {
     event.waitUntil(

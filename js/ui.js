@@ -218,6 +218,26 @@ document.addEventListener('DOMContentLoaded', () => {
     let allExercises    = []; // [{ name, lastWeight, lastReps, def }]
     let currentTracking = 'weighted';
 
+    // --- APP VERSION (in Settings) ---
+    // Ask the active service worker which cache is serving us, so the number
+    // reflects the live deploy and ticks over when an update lands.
+    (function showAppVersion() {
+        const el = document.getElementById('app-version');
+        if (!el) return;
+        const render = (v) => { el.textContent = v ? `Version ${v.replace(/^workout-pwa-/, '')}` : 'Version (not installed)'; };
+        const sw = navigator.serviceWorker;
+        if (!sw) { render(null); return; }
+        const ask = () => {
+            // On a fresh install the controller attaches after load, so retry until present.
+            if (!sw.controller) return;
+            const ch = new MessageChannel();
+            ch.port1.onmessage = (e) => render(e.data);
+            sw.controller.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+        };
+        ask();
+        if (!sw.controller) sw.addEventListener('controllerchange', ask, { once: true });
+    })();
+
     // --- INITIALIZATION ---
     DB.seedExercises()
         .then(loadExerciseDefs)
@@ -1524,13 +1544,20 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             document.getElementById(btn.dataset.target).classList.remove('hidden');
 
-            if (btn.dataset.target === 'view-history') loadHistory();
+            // Defer the heavy per-view DOM build to the next frame so the view swap
+            // and nav-pill animation paint first — otherwise the synchronous build
+            // (history heatmap + every session card, etc.) janks the transition.
+            const afterPaint = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+
+            if (btn.dataset.target === 'view-history') afterPaint(loadHistory);
             if (btn.dataset.target === 'view-analysis') {
-                loadAnalysis();
-                if (analysisMode === 'patterns') loadPatternAnalysis();
-                if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
+                afterPaint(() => {
+                    loadAnalysis();
+                    if (analysisMode === 'patterns') loadPatternAnalysis();
+                    if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
+                });
             }
-            if (btn.dataset.target === 'view-backup') renderManageList();
+            if (btn.dataset.target === 'view-backup') afterPaint(renderManageList);
         });
     });
 });
