@@ -19,6 +19,18 @@ body {
     background-color: var(--bg-color);
     color: var(--text-primary);
     padding-bottom: 70px;
+    /* Prevent the iOS hold-and-swipe text/element highlight that interrupts flow */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Keep text editable/selectable where it actually matters */
+input, textarea, select, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
 }
 
 header {

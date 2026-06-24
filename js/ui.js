@@ -352,11 +352,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${hint ? `<span class="autocomplete-item-hint">${hint}</span>` : ''}
                 `;
 
-                el.addEventListener('touchstart', () => {
+                let touchStartY = 0, touchMoved = false;
+
+                el.addEventListener('touchstart', (e) => {
+                    touchStartY = e.touches[0].clientY;
+                    touchMoved = false;
                     el.classList.add('is-pressing');
                 }, { passive: true });
 
+                el.addEventListener('touchmove', (e) => {
+                    // Treat a real drag as a scroll, not a tap, so the list can scroll
+                    if (Math.abs(e.touches[0].clientY - touchStartY) > 8) {
+                        touchMoved = true;
+                        el.classList.remove('is-pressing');
+                    }
+                }, { passive: true });
+
                 el.addEventListener('touchend', (e) => {
+                    if (touchMoved) return;   // was a scroll — don't select
                     e.preventDefault();
                     selectExercise(item);
                 });
@@ -1102,6 +1115,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // machine row and a cable row both roll up into "Horizontal Pull". Lets you
     // track a pattern's progression across exercise variations.
     let patternChart = null;
+
+    // On touch devices a tapped tooltip/point stays stuck because there's no
+    // mouseout. Tapping anywhere off the chart canvases clears the active point
+    // and tooltip so the info dismisses.
+    function dismissChartTooltips() {
+        [analysisChart, patternChart].forEach(chart => {
+            if (!chart) return;
+            chart.setActiveElements([]);
+            if (chart.tooltip) chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+            chart.update();
+        });
+    }
+    document.addEventListener('touchstart', (e) => {
+        if (!e.target.closest || !e.target.closest('canvas')) dismissChartTooltips();
+    }, { passive: true });
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest || !e.target.closest('canvas')) dismissChartTooltips();
+    });
 
     const patternLabel = (p) =>
         p.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
