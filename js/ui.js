@@ -812,23 +812,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="session-body"></div>`;
 
                 const body = card.querySelector('.session-body');
-                const seen = new Set();
-                setsAsc.forEach(s => {
-                    const exCat = getCategory(s.exercise);
-                    const time  = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const arrow = seen.has(s.exercise) ? '' : progressIcon(s.exercise, day.key);
-                    seen.add(s.exercise);
-                    const row = document.createElement('div');
-                    row.className = 'timeline-row';
-                    if (exCat) row.dataset.cat = exCat;
-                    row.innerHTML = `
-                        <span class="tl-time">${time}</span>
-                        <span class="tl-ex${exCat ? ` cat-${exCat}` : ''}">${s.exercise}${arrow}</span>
-                        <span class="tl-detail">${formatSet(s)}</span>`;
-                    body.appendChild(row);
-                });
+                // Build the timeline rows lazily — collapsed bodies are display:none,
+                // so populating every day's rows upfront is wasted work that lagged the
+                // History open. Only the initially-open card is built now; the rest fill
+                // in the first time they're expanded.
+                const populateBody = () => {
+                    if (card.dataset.populated) return;
+                    card.dataset.populated = 'true';
+                    const seen = new Set();
+                    setsAsc.forEach(s => {
+                        const exCat = getCategory(s.exercise);
+                        const time  = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const arrow = seen.has(s.exercise) ? '' : progressIcon(s.exercise, day.key);
+                        seen.add(s.exercise);
+                        const row = document.createElement('div');
+                        row.className = 'timeline-row';
+                        if (exCat) row.dataset.cat = exCat;
+                        row.innerHTML = `
+                            <span class="tl-time">${time}</span>
+                            <span class="tl-ex${exCat ? ` cat-${exCat}` : ''}">${s.exercise}${arrow}</span>
+                            <span class="tl-detail">${formatSet(s)}</span>`;
+                        body.appendChild(row);
+                    });
+                };
+                if (i === 0) populateBody();
 
-                card.querySelector('.session-header').addEventListener('click', () => card.classList.toggle('open'));
+                card.querySelector('.session-header').addEventListener('click', () => {
+                    if (!card.classList.contains('open')) populateBody(); // build on first expand
+                    card.classList.toggle('open');
+                });
                 sessionsDiv.appendChild(card);
             });
 
