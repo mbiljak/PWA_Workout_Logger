@@ -18,7 +18,8 @@
 body {
     background-color: var(--bg-color);
     color: var(--text-primary);
-    padding-bottom: 70px;
+    /* Clears the fixed bottom nav (taller now) plus the iPhone home-bar inset */
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
     /* Prevent the iOS hold-and-swipe text/element highlight that interrupts flow */
     -webkit-user-select: none;
     user-select: none;
@@ -132,30 +133,83 @@ button {
     padding-bottom: 4px;
 }
 
-/* Bottom Nav */
+/* Bottom Nav — frosted glass bar with Material-style active pill */
 .bottom-nav {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    background-color: var(--surface-color);
     display: flex;
     justify-content: space-around;
-    border-top: 1px solid #333;
-    padding-bottom: env(safe-area-inset-bottom); /* respects iPhone home bar */
+    align-items: flex-start;
+    /* Translucent + blurred so content softly shows through (modern iOS feel) */
+    background-color: rgba(24, 24, 24, 0.82);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 10px;
+    /* Extra breathing room so the bar clears the iPhone home-swipe indicator */
+    padding-bottom: calc(env(safe-area-inset-bottom) + 14px);
+    z-index: 20;
 }
 
 .nav-btn {
     background: none;
+    border: none;
     color: var(--text-secondary);
-    padding: 18px 16px;    /* was 16px, taller tap target */
     flex: 1;
-    font-size: 1rem;
-    border-radius: 0;
-    min-height: 70px;      /* was 60px */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.25s ease;
 }
+
+.nav-btn .nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 30px;
+    border-radius: 999px;
+    /* The active "pill" grows in behind the icon */
+    background-color: transparent;
+    transition: background-color 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+                transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.nav-btn .nav-icon svg {
+    width: 24px;
+    height: 24px;
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.nav-btn .nav-label {
+    transition: color 0.25s ease, opacity 0.25s ease;
+    opacity: 0.85;
+}
+
+/* Press feedback */
+.nav-btn:active .nav-icon { transform: scale(0.9); }
+
 .nav-btn.active {
     color: var(--accent-color);
+}
+.nav-btn.active .nav-icon {
+    background-color: rgba(0, 123, 255, 0.16);
+}
+.nav-btn.active .nav-icon svg {
+    transform: translateY(-1px);
+}
+.nav-btn.active .nav-label {
+    opacity: 1;
+    font-weight: 600;
 }
 
 /* Stepper Layout */
