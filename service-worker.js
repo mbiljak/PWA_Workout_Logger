@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workout-pwa-v15'; // always increment for official updates
+const CACHE_NAME = 'workout-pwa-v16'; // always increment for official updates
 const ASSETS = [
     './',
     './index.html',
@@ -13,7 +13,8 @@ const ASSETS = [
     './icon-192.png',
     './icon-512.png',
     './favicon.ico',
-    'https://unpkg.com/dexie/dist/dexie.js'
+    'https://unpkg.com/dexie/dist/dexie.js',
+    'https://cdn.jsdelivr.net/npm/chart.js'
 ];
 
 self.addEventListener('install', event => {
@@ -34,8 +35,15 @@ self.addEventListener('activate', event => {
     );
 });
 
-// Network-first for our own files: always pick up the latest deploy when online,
-// fall back to the cache only when offline. Cross-origin (Dexie CDN) stays cache-first.
+// Stale-while-revalidate for our own files: serve the cached copy instantly (so
+// the installed PWA paints with no network wait), and refresh the cache in the
+// background so the next launch runs the latest deploy. Cross-origin (Dexie /
+// Chart.js CDN) stays cache-first.
+//
+// NOTE: this serves up to one-launch-old app code before the background refresh
+// applies. That only matters when a deploy changes the IndexedDB schema in
+// db.js — see the data-safety note in CLAUDE.md. It never affects logged data
+// itself, which lives in IndexedDB and is untouched by the cache.
 self.addEventListener('fetch', event => {
     const { request } = event;
     if (request.method !== 'GET') return;
@@ -43,17 +51,22 @@ self.addEventListener('fetch', event => {
     const sameOrigin = new URL(request.url).origin === self.location.origin;
 
     if (sameOrigin) {
-        // `cache: 'reload'` bypasses the browser's HTTP cache so "network-first"
-        // genuinely hits the origin (GitHub Pages sends max-age=600 otherwise).
         event.respondWith(
-            fetch(request, { cache: 'reload' })
-                .then(response => {
-                    const copy = response.clone();
-                    caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-                    return response;
-                })
-                .catch(() => caches.match(request).then(
-                    cached => cached || caches.match('./index.html')))
+            caches.match(request).then(cached => {
+                // Background refresh. `cache: 'reload'` bypasses the browser's
+                // HTTP cache so the revalidation genuinely hits the origin
+                // (GitHub Pages sends max-age=600 otherwise).
+                const fetching = fetch(request, { cache: 'reload' })
+                    .then(response => {
+                        const copy = response.clone();
+                        caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+                        return response;
+                    })
+                    .catch(() => cached || caches.match('./index.html'));
+
+                // Serve cache immediately when present; otherwise wait on network.
+                return cached || fetching;
+            })
         );
     } else {
         event.respondWith(

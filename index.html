@@ -15,7 +15,8 @@
     
     <link rel="stylesheet" href="css/style.css">
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js is only needed in the Analysis view; defer it so it never blocks first paint. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <main>
@@ -293,10 +294,14 @@
                 .then(reg => { reg.update(); })
                 .catch(err => console.error('SW registration failed!', err));
 
-            // When a new worker takes control, reload once so the page runs fresh code.
+            // Only reload when an *existing* controller is replaced by a new worker —
+            // i.e. a real update to an already-running page. On the very first install
+            // there's no prior controller, so we skip the reload (and its black-screen
+            // flash); the fresh SW is already serving this load.
+            const hadController = !!navigator.serviceWorker.controller;
             let reloading = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (reloading) return;
+                if (!hadController || reloading) return;
                 reloading = true;
                 location.reload();
             });
