@@ -52,6 +52,14 @@ main {
 
 .hidden { display: none !important; }
 
+/* One consistent fade-in for every view so all four tabs transition identically.
+   Re-displaying a previously display:none view restarts the animation. */
+@keyframes viewFade {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+}
+.view:not(.hidden) { animation: viewFade 0.2s ease; }
+
 .app-version {
     margin-top: 28px;
     text-align: center;

@@ -217,6 +217,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- STATE ---
     let allExercises    = []; // [{ name, lastWeight, lastReps, def }]
     let currentTracking = 'weighted';
+    // History is rebuilt only when a set actually changes (see refreshSetViews).
+    // The common "open History" path then does zero work, so the nav transition
+    // stays as smooth as the other tabs. Starts dirty so it builds once.
+    let historyDirty    = true;
 
     // --- APP VERSION (in Settings) ---
     // Ask the active service worker which cache is serving us, so the number
@@ -244,6 +248,12 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(autoImportCSV)
         .then(refreshExerciseCache);
     loadTodaySets();
+
+    // Pre-build the (hidden) History view during idle time so the first tap is
+    // instant — the work happens off the critical path, not mid tab-switch.
+    const warmHistory = () => loadHistory();
+    if ('requestIdleCallback' in window) requestIdleCallback(warmHistory, { timeout: 2000 });
+    else setTimeout(warmHistory, 800); // iOS Safari has no requestIdleCallback
 
     async function loadExerciseDefs() {
         const defs = await DB.getAllExercises();
@@ -507,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
             localStorage.setItem('sample_data_imported', 'true');
+            historyDirty = true; // imported sets must show even if History was warmed first
             await refreshExerciseCache();
             loadTodaySets();
         } catch (err) {
@@ -545,6 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentTracking === 'banded') set.bandLevel = currentBand;
 
         await DB.addSet(set);
+        historyDirty = true; // new set logged — History must rebuild before next open
         const lastSets   = await DB.getLastSessionAllSets(set.exercise);
         const customWarn = avgIntraRestMs(lastSets, set.exercise) ?? WARN_MS;
         startTimer(Date.now(), customWarn);
@@ -576,6 +588,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadHistory() {
+        historyDirty = false; // freshly built below; stays clean until a set changes
         const sets = await DB.getAllSets();
         const container = document.getElementById('history-container');
         container.innerHTML = '';
@@ -870,7 +883,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function refreshSetViews() {
         loadTodaySets();
-        if (!document.getElementById('view-history').classList.contains('hidden')) loadHistory();
+        historyDirty = true; // a set changed — History must rebuild before next view
+        // If History is open right now, refresh it — but after the current
+        // interaction/animation settles, so the rebuild never janks a transition.
+        if (!document.getElementById('view-history').classList.contains('hidden'))
+            setTimeout(loadHistory, 300);
     }
 
     // ── EDIT LOGGED SET MODAL ─────────────────────────────────────────────────
@@ -1561,7 +1578,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // (history heatmap + every session card, etc.) janks the transition.
             const afterPaint = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
 
-            if (btn.dataset.target === 'view-history') afterPaint(loadHistory);
+            // History is pre-built and stays cached until a set changes, so the
+            // normal open does no work and the pill animates like the other tabs.
+            if (btn.dataset.target === 'view-history' && historyDirty) afterPaint(loadHistory);
             if (btn.dataset.target === 'view-analysis') {
                 afterPaint(() => {
                     loadAnalysis();
