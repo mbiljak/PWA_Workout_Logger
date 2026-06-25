@@ -570,16 +570,21 @@ input::-webkit-inner-spin-button {
     margin: 12px 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     border-left: 3px solid var(--accent-color);
 }
-.predict-label  { font-size: 0.75rem; color: var(--accent-color); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-.predict-targets { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 1rem; }
-.predict-last  { color: var(--text-secondary); }
-.predict-last strong { color: var(--text-primary); }
-.predict-arrow { color: var(--accent-color); font-weight: 700; }
-.predict-next strong { color: var(--accent-color); font-size: 1.15rem; }
-.predict-basis { font-size: 0.8rem; color: var(--text-secondary); }
+.predict-head { display: flex; align-items: center; justify-content: space-between; }
+.predict-label { font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.predict-acc {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    background: rgba(0, 123, 255, 0.14);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+.predict-next { font-size: 1.5rem; font-weight: 700; color: var(--accent-color); line-height: 1.1; }
+.predict-sub  { font-size: 0.8rem; color: var(--text-secondary); }
 
 /* Flat per-exercise set log */
 .set-log-analysis { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }

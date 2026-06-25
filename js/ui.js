@@ -215,7 +215,8 @@ function predictNextTarget(sets, tracking, increment) {
         return {
             lastLabel: `${fmtDuration(best)} hold`,
             nextLabel: `${fmtDuration(best + 5)} hold`,
-            basis: 'Add ~5s to your best hold each session.'
+            basis: '+5s',
+            metric: 'duration', target: best + 5
         };
     }
 
@@ -225,7 +226,8 @@ function predictNextTarget(sets, tracking, increment) {
         return {
             lastLabel: `${best} reps`,
             nextLabel: `${best + 1} reps`,
-            basis: 'Add a rep — step up a band level once that feels easy.'
+            basis: '+1 rep',
+            metric: 'reps', target: best + 1
         };
     }
 
@@ -240,10 +242,12 @@ function predictNextTarget(sets, tracking, increment) {
     const anyAdded = sets.some(s => (s.weight || 0) > 0);
     if (tracking === 'bodyweight' && !anyAdded) {
         if (lastReps >= 20)
-            return { lastLabel: `${lastReps} reps`, nextLabel: `add light weight (+${increment} lbs)`,
-                     basis: 'High reps — add a little load to keep progressing.' };
+            return { lastLabel: `${lastReps} reps`, nextLabel: `+${increment} lbs`,
+                     basis: 'add load',
+                     metric: 'reps', target: lastReps + 1 };
         return { lastLabel: `${lastReps} reps`, nextLabel: `${lastReps + 1} reps`,
-                 basis: 'Add a rep each session.' };
+                 basis: '+1 rep',
+                 metric: 'reps', target: lastReps + 1 };
     }
 
     // Demonstrated rep range at this weight (recent history), used as the ceiling/floor.
@@ -257,13 +261,15 @@ function predictNextTarget(sets, tracking, increment) {
         return {
             lastLabel: `${wLabel(topW)} × ${lastReps}`,
             nextLabel: `${wLabel(nextW)} × ${repLo}`,
-            basis: `Hit the top of your ${repLo}–${repHi} range — add ${increment} lbs and reset reps.`
+            basis: `+${increment} lbs · reset reps`,
+            metric: 'e1rm', target: e1rm(nextW, repLo)
         };
     }
     return {
         lastLabel: `${wLabel(topW)} × ${lastReps}`,
         nextLabel: `${wLabel(topW)} × ${lastReps + 1}`,
-        basis: `Add a rep (working toward ${repHi}, then +${increment} lbs).`
+        basis: `+1 rep · cap ${repHi}`,
+        metric: 'e1rm', target: e1rm(topW, lastReps + 1)
     };
 }
 
@@ -275,6 +281,42 @@ function inferIncrement(sets) {
     for (let i = 1; i < weights.length; i++) gap = Math.min(gap, weights[i] - weights[i - 1]);
     if (!isFinite(gap) || gap <= 0) gap = 5;
     return Math.min(25, Math.max(2.5, gap));
+}
+
+// ── PREDICTION BACKTEST ───────────────────────────────────────────────────────
+// Measures how accurate predictNextTarget actually is on the user's own log. For
+// each past session, it runs the SAME prediction over only the sets up to the prior
+// session, then checks whether the real session reached at least that projected
+// target (compared in e1RM / reps / seconds — the metric the prediction reports).
+// Reuses predictNextTarget, so the model stays single-sourced; read-only, no tuning.
+// Returns { tested, hits, rate } or null when there isn't enough history to score.
+function backtestPrediction(sets, tracking) {
+    if (!sets || sets.length < 3) return null;
+
+    // Sessions oldest → newest.
+    const byDay = {};
+    sets.forEach(s => { (byDay[new Date(s.timestamp).toLocaleDateString()] ||= []).push(s); });
+    const days = Object.keys(byDay)
+        .sort((a, b) => byDay[a][0].timestamp - byDay[b][0].timestamp)
+        .map(k => byDay[k]);
+
+    const achieved = (session, metric) => {
+        if (metric === 'duration') return Math.max(0, ...session.map(s => s.duration || 0));
+        if (metric === 'reps')     return Math.max(0, ...session.map(s => s.reps || 0));
+        return Math.max(0, ...session.map(s => e1rm(s.weight || 0, s.reps || 0))); // 'e1rm'
+    };
+
+    let tested = 0, hits = 0;
+    for (let i = 2; i < days.length; i++) {
+        const prior = days.slice(0, i).flat();
+        const pred  = predictNextTarget(prior, tracking, inferIncrement(prior));
+        if (!pred || !pred.metric) continue;
+        tested++;
+        if (achieved(days[i], pred.metric) >= pred.target * 0.99) hits++;
+    }
+
+    if (tested < 5) return null;
+    return { tested, hits, rate: Math.round((hits / tested) * 100) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1249,14 +1291,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const prediction = predictNextTarget(sets, tracking, inferIncrement(sets));
         if (prediction) {
             predictCard.className = 'predict-card';
+            // Accuracy of this model on the user's own log (only shown with enough history).
+            const bt = backtestPrediction(sets, tracking);
+            const btBadge = bt
+                ? `<span class="predict-acc" title="Reached this target in ${bt.hits} of ${bt.tested} recent sessions">${bt.rate}%</span>`
+                : '';
             predictCard.innerHTML = `
-                <span class="predict-label">📈 Progressive overload</span>
-                <div class="predict-targets">
-                    <span class="predict-last">Last <strong>${prediction.lastLabel}</strong></span>
-                    <span class="predict-arrow">→</span>
-                    <span class="predict-next">Next <strong>${prediction.nextLabel}</strong></span>
+                <div class="predict-head">
+                    <span class="predict-label">Next target</span>
+                    ${btBadge}
                 </div>
-                <span class="predict-basis">${prediction.basis}</span>`;
+                <span class="predict-next">${prediction.nextLabel}</span>
+                <span class="predict-sub">from ${prediction.lastLabel} · ${prediction.basis}</span>`;
         } else {
             predictCard.className = 'predict-card hidden';
         }
