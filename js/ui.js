@@ -191,6 +191,92 @@ function avgIntraRestMs(allDaySets, exerciseName) {
     return gaps.reduce((a, b) => a + b, 0) / gaps.length;
 }
 
+// Progressive-overload suggestion via double progression. Pure/testable: takes the
+// raw sets for one exercise, the tracking type, and a weight increment, and returns
+// { lastLabel, nextLabel, basis } or null when there isn't enough history.
+//
+// Double progression: keep adding reps at a fixed weight until you hit the top of
+// your demonstrated rep range, then add weight and drop back to the bottom. The rep
+// range is inferred from the user's own recent sets, so it adapts to whether they
+// train heavy/low-rep or light/high-rep. This is a heuristic nudge, not a guarantee.
+function predictNextTarget(sets, tracking, increment) {
+    if (!sets || sets.length < 2) return null;
+
+    // Group into sessions by calendar day, newest last.
+    const byDay = {};
+    sets.forEach(s => { (byDay[new Date(s.timestamp).toLocaleDateString()] ||= []).push(s); });
+    const days = Object.values(byDay).sort((a, b) => a[0].timestamp - b[0].timestamp);
+    if (days.length < 2) return null;
+    const last = days[days.length - 1];
+
+    if (tracking === 'timed') {
+        const best = Math.max(...last.map(s => s.duration || 0));
+        if (best <= 0) return null;
+        return {
+            lastLabel: `${fmtDuration(best)} hold`,
+            nextLabel: `${fmtDuration(best + 5)} hold`,
+            basis: 'Add ~5s to your best hold each session.'
+        };
+    }
+
+    if (tracking === 'banded') {
+        const best = Math.max(...last.map(s => s.reps || 0));
+        if (best <= 0) return null;
+        return {
+            lastLabel: `${best} reps`,
+            nextLabel: `${best + 1} reps`,
+            basis: 'Add a rep — step up a band level once that feels easy.'
+        };
+    }
+
+    // weighted / bodyweight. Top working weight of the most recent session and the
+    // best (most reps) set at that weight.
+    const topW    = Math.max(...last.map(s => s.weight || 0));
+    const atTop   = last.filter(s => (s.weight || 0) === topW && (s.reps || 0) > 0);
+    if (!atTop.length) return null;
+    const lastReps = Math.max(...atTop.map(s => s.reps || 0));
+
+    // Pure-bodyweight (no added weight ever): progress by reps.
+    const anyAdded = sets.some(s => (s.weight || 0) > 0);
+    if (tracking === 'bodyweight' && !anyAdded) {
+        if (lastReps >= 20)
+            return { lastLabel: `${lastReps} reps`, nextLabel: `add light weight (+${increment} lbs)`,
+                     basis: 'High reps — add a little load to keep progressing.' };
+        return { lastLabel: `${lastReps} reps`, nextLabel: `${lastReps + 1} reps`,
+                 basis: 'Add a rep each session.' };
+    }
+
+    // Demonstrated rep range at this weight (recent history), used as the ceiling/floor.
+    const repsAtW = sets.filter(s => (s.weight || 0) === topW && (s.reps || 0) > 0).map(s => s.reps);
+    const repHi = repsAtW.length ? Math.max(...repsAtW) : lastReps;
+    const repLo = repsAtW.length ? Math.min(...repsAtW) : Math.max(1, lastReps - 4);
+    const wLabel = (w) => tracking === 'bodyweight' ? `BW+${w} lbs` : `${w} lbs`;
+
+    if (lastReps >= repHi) {
+        const nextW = topW + increment;
+        return {
+            lastLabel: `${wLabel(topW)} × ${lastReps}`,
+            nextLabel: `${wLabel(nextW)} × ${repLo}`,
+            basis: `Hit the top of your ${repLo}–${repHi} range — add ${increment} lbs and reset reps.`
+        };
+    }
+    return {
+        lastLabel: `${wLabel(topW)} × ${lastReps}`,
+        nextLabel: `${wLabel(topW)} × ${lastReps + 1}`,
+        basis: `Add a rep (working toward ${repHi}, then +${increment} lbs).`
+    };
+}
+
+// Smallest sensible weight jump for an exercise: the smallest positive gap between
+// the distinct weights the user has actually used, clamped to a realistic range.
+function inferIncrement(sets) {
+    const weights = [...new Set(sets.map(s => s.weight || 0).filter(w => w > 0))].sort((a, b) => a - b);
+    let gap = Infinity;
+    for (let i = 1; i < weights.length; i++) gap = Math.min(gap, weights[i] - weights[i - 1]);
+    if (!isFinite(gap) || gap <= 0) gap = 5;
+    return Math.min(25, Math.max(2.5, gap));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -996,10 +1082,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderAnalysis(exerciseName) {
-        const prCard = document.getElementById('analysis-pr');
+        const prCard      = document.getElementById('analysis-pr');
+        const predictCard = document.getElementById('analysis-prediction');
+        const setLogEl    = document.getElementById('analysis-set-log');
         const canvas = document.getElementById('analysis-chart');
         if (!exerciseName) {
             prCard.className = 'pr-card hidden';
+            predictCard.className = 'predict-card hidden';
+            setLogEl.innerHTML = '';
             if (analysisChart) { analysisChart.destroy(); analysisChart = null; }
             return;
         }
@@ -1154,27 +1244,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+
+        // ── Progressive-overload prediction ──────────────────────────────────────
+        const prediction = predictNextTarget(sets, tracking, inferIncrement(sets));
+        if (prediction) {
+            predictCard.className = 'predict-card';
+            predictCard.innerHTML = `
+                <span class="predict-label">📈 Progressive overload</span>
+                <div class="predict-targets">
+                    <span class="predict-last">Last <strong>${prediction.lastLabel}</strong></span>
+                    <span class="predict-arrow">→</span>
+                    <span class="predict-next">Next <strong>${prediction.nextLabel}</strong></span>
+                </div>
+                <span class="predict-basis">${prediction.basis}</span>`;
+        } else {
+            predictCard.className = 'predict-card hidden';
+        }
+
+        // ── Flat set log (newest first) ──────────────────────────────────────────
+        const byNewest = [...sets].sort((a, b) => b.timestamp - a.timestamp);
+        const dShort = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        setLogEl.innerHTML =
+            `<div class="set-log-title">All sets · ${sets.length}</div>` +
+            byNewest.map(s => {
+                const cat   = getCategory(exerciseName);
+                const e1    = useE1rm ? Math.round(e1rm(loadAt(s), s.reps || 0)) : null;
+                const notes = (s.notes && s.notes !== 'Imported from CSV') ? s.notes : '';
+                return `<div class="set-log-row"${cat ? ` data-cat="${cat}"` : ''}>
+                    <span class="sl-date">${dShort(s.timestamp)}</span>
+                    <span class="sl-set">${formatSet(s)}</span>
+                    <span class="sl-e1rm">${e1 ? `e1RM ${e1}` : ''}</span>
+                    ${notes ? `<span class="sl-notes">${notes}</span>` : ''}
+                </div>`;
+            }).join('');
     }
 
     document.getElementById('analysis-exercise')
         .addEventListener('change', e => renderAnalysis(e.target.value));
 
-    // ── PATTERN ANALYSIS ─────────────────────────────────────────────────────────
-    // Aggregates every logged set whose exercise shares a movement pattern, so a
-    // machine row and a cable row both roll up into "Horizontal Pull". Lets you
-    // track a pattern's progression across exercise variations.
-    let patternChart = null;
-
     // On touch devices a tapped tooltip/point stays stuck because there's no
-    // mouseout. Tapping anywhere off the chart canvases clears the active point
+    // mouseout. Tapping anywhere off the chart canvas clears the active point
     // and tooltip so the info dismisses.
     function dismissChartTooltips() {
-        [analysisChart, patternChart].forEach(chart => {
-            if (!chart) return;
-            chart.setActiveElements([]);
-            if (chart.tooltip) chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-            chart.update();
-        });
+        const chart = analysisChart;
+        if (!chart) return;
+        chart.setActiveElements([]);
+        if (chart.tooltip) chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+        chart.update();
     }
     document.addEventListener('touchstart', (e) => {
         if (!e.target.closest || !e.target.closest('canvas')) dismissChartTooltips();
@@ -1182,150 +1298,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', (e) => {
         if (!e.target.closest || !e.target.closest('canvas')) dismissChartTooltips();
     });
-
-    const patternLabel = (p) =>
-        p.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-
-    async function loadPatternAnalysis() {
-        const select = document.getElementById('analysis-pattern');
-        const prev   = select.value;
-        const all    = await DB.getAllSets();
-        const present = new Set();
-        all.forEach(s => { const d = getDef(s.exercise); if (d && d.pattern) present.add(d.pattern); });
-        const ordered = MOVEMENT_PATTERNS.filter(p => present.has(p));
-        select.innerHTML = '<option value="">Select a movement pattern…</option>';
-        ordered.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p;
-            opt.textContent = patternLabel(p);
-            if (p === prev) opt.selected = true;
-            select.appendChild(opt);
-        });
-        if (prev && present.has(prev)) renderPatternAnalysis(prev);
-    }
-
-    async function renderPatternAnalysis(pattern) {
-        const prCard      = document.getElementById('pattern-pr');
-        const canvas      = document.getElementById('pattern-chart');
-        const breakdownEl = document.getElementById('pattern-breakdown');
-        if (!pattern) {
-            prCard.className = 'pr-card hidden';
-            breakdownEl.innerHTML = '';
-            if (patternChart) { patternChart.destroy(); patternChart = null; }
-            return;
-        }
-
-        const all  = await DB.getAllSets();
-        const sets = all.filter(s => { const d = getDef(s.exercise); return d && d.pattern === pattern; });
-        if (!sets.length) {
-            prCard.className = 'pr-card hidden';
-            breakdownEl.innerHTML = '';
-            if (patternChart) { patternChart.destroy(); patternChart = null; }
-            return;
-        }
-
-        const sessionMap = {};
-        sets.forEach(s => {
-            const key = new Date(s.timestamp).toLocaleDateString();
-            if (!sessionMap[key]) sessionMap[key] = { timestamp: s.timestamp, sets: [] };
-            sessionMap[key].sets.push(s);
-        });
-        const sessions = Object.entries(sessionMap).sort((a, b) => a[1].timestamp - b[1].timestamp);
-        const labels   = sessions.map(([, s]) =>
-            new Date(s.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-        const dated = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-        // e1RM is only meaningful for loaded sets; 0 means "not applicable".
-        const e1rmOf = (s) => {
-            const d = getDef(s.exercise);
-            const t = d?.tracking || 'weighted';
-            if (t === 'weighted' || (t === 'bodyweight' && (s.weight || 0) > 0))
-                return e1rm(loadOf(s, d, bodyweightAt(s.timestamp)), s.reps);
-            return 0;
-        };
-        const anyE1rm = sets.some(s => e1rmOf(s) > 0);
-
-        const barData = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + setVolume(x), 0)));
-        let lineData, lineLabel, lineAxis, prHtml;
-        if (anyE1rm) {
-            lineData  = sessions.map(([, s]) => {
-                const vals = s.sets.map(e1rmOf).filter(v => v > 0);
-                return vals.length ? Math.round(Math.max(...vals)) : null;
-            });
-            lineLabel = 'Best e1RM (lbs)'; lineAxis = 'e1RM (lbs)';
-            const prSet = sets.reduce((b, s) => e1rmOf(s) > e1rmOf(b) ? s : b);
-            prHtml = `<span class="pr-set">${prSet.exercise} · ${formatSet(prSet)}</span>
-                      <span class="pr-e1rm">e1RM: ${Math.round(e1rmOf(prSet))} lbs · ${dated(prSet.timestamp)}</span>`;
-        } else {
-            lineData  = sessions.map(([, s]) => s.sets.reduce((a, x) => a + (x.reps || 0), 0));
-            lineLabel = 'Total reps'; lineAxis = 'Reps';
-            const prSet = sets.reduce((b, s) => setVolume(s) > setVolume(b) ? s : b);
-            prHtml = `<span class="pr-set">${prSet.exercise} · ${formatSet(prSet)}</span>
-                      <span class="pr-e1rm">Top volume set · ${dated(prSet.timestamp)}</span>`;
-        }
-
-        prCard.className = 'pr-card';
-        prCard.innerHTML = `<span class="pr-label">🏆 ${patternLabel(pattern)} PR</span>${prHtml}`;
-
-        // Dominant category drives the accent (a pattern can span categories).
-        const catCount = {};
-        sets.forEach(s => { const c = getCategory(s.exercise); if (c) catCount[c] = (catCount[c] || 0) + 1; });
-        const domCat = Object.entries(catCount).sort((a, b) => b[1] - a[1])[0]?.[0];
-        const accent = domCat === 'push' ? '#ff6b6b' : domCat === 'pull' ? '#4dabf7'
-                     : domCat === 'legs' ? '#69db7c' : '#b197fc';
-
-        // Contributing-exercise volume share — the whole point of the pattern view.
-        const byEx = {};
-        sets.forEach(s => { byEx[s.exercise] = (byEx[s.exercise] || 0) + setVolume(s); });
-        const total = Object.values(byEx).reduce((a, b) => a + b, 0) || 1;
-        const rows  = Object.entries(byEx).sort((a, b) => b[1] - a[1]);
-        breakdownEl.innerHTML = `<div class="pattern-breakdown-title">Contributing exercises</div>` +
-            rows.map(([name, v]) => {
-                const pct = Math.round(v / total * 100);
-                return `<div class="pattern-bar-row">
-                            <span class="pattern-bar-name">${name}</span>
-                            <span class="pattern-bar-track"><span class="pattern-bar-fill" style="width:${pct}%;background:${accent}"></span></span>
-                            <span class="pattern-bar-pct">${pct}%</span>
-                        </div>`;
-            }).join('');
-
-        if (patternChart) { patternChart.destroy(); }
-        patternChart = new Chart(canvas, {
-            data: {
-                labels,
-                datasets: [
-                    {
-                        type: 'line', label: lineLabel, data: lineData,
-                        borderColor: accent, backgroundColor: accent + '22',
-                        fill: true, tension: 0.35, pointRadius: 4,
-                        pointBackgroundColor: accent, spanGaps: true,
-                        yAxisID: 'y', order: 1,
-                    },
-                    {
-                        type: 'bar', label: 'Volume (lbs)', data: barData,
-                        backgroundColor: '#ffffff12', borderColor: '#ffffff25',
-                        borderWidth: 1, yAxisID: 'y2', order: 2,
-                    }
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } },
-                    tooltip: { backgroundColor: '#1e1e1e', titleColor: '#fff', bodyColor: '#aaa', borderColor: '#333', borderWidth: 1 }
-                },
-                scales: {
-                    x:  { ticks: { color: '#aaa', maxRotation: 45, font: { size: 10 } }, grid: { color: '#2a2a2a' } },
-                    y:  { position: 'left',  title: { display: true, text: lineAxis, color: '#aaa', font: { size: 10 } }, ticks: { color: accent, font: { size: 10 } }, grid: { color: '#2a2a2a' } },
-                    y2: { position: 'right', title: { display: true, text: 'Volume (lbs)', color: '#aaa', font: { size: 10 } }, ticks: { color: '#555', font: { size: 10 } }, grid: { drawOnChartArea: false } }
-                }
-            }
-        });
-    }
-
-    document.getElementById('analysis-pattern')
-        .addEventListener('change', e => renderPatternAnalysis(e.target.value));
 
     // ── MUSCLE MAP ───────────────────────────────────────────────────────────────
     const bodyFront   = document.getElementById('body-front');
@@ -1411,7 +1383,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mode toggle (Exercise | Muscles)
     const exerciseModeEl = document.getElementById('analysis-exercise-mode');
-    const patternModeEl  = document.getElementById('analysis-pattern-mode');
     const muscleModeEl   = document.getElementById('analysis-muscle-mode');
     let   analysisMode   = 'exercise';
     document.querySelectorAll('#analysis-mode .seg-btn').forEach(btn => {
@@ -1420,9 +1391,7 @@ document.addEventListener('DOMContentLoaded', () => {
             analysisMode = btn.dataset.mode;
             document.querySelectorAll('#analysis-mode .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
             exerciseModeEl.classList.toggle('hidden', analysisMode !== 'exercise');
-            patternModeEl.classList.toggle('hidden', analysisMode !== 'patterns');
             muscleModeEl.classList.toggle('hidden', analysisMode !== 'muscles');
-            if (analysisMode === 'patterns') loadPatternAnalysis();
             if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
         };
         btn.addEventListener('click', pick);
@@ -1584,7 +1553,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btn.dataset.target === 'view-analysis') {
                 afterPaint(() => {
                     loadAnalysis();
-                    if (analysisMode === 'patterns') loadPatternAnalysis();
                     if (analysisMode === 'muscles')  renderMuscleMap(musclePeriod);
                 });
             }

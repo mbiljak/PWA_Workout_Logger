@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workout-pwa-v22'; // always increment for official updates
+const CACHE_NAME = 'workout-pwa-v23'; // always increment for official updates
 const ASSETS = [
     './',
     './index.html',
