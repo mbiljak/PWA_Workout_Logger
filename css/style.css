@@ -113,7 +113,12 @@ button {
 .btn-primary {
     background-color: var(--accent-color);
     color: white;
+    /* Smooth the JS-driven "Saved!" green flash and give a tactile press. */
+    transition: background-color 0.25s ease, transform 0.12s ease;
 }
+.btn-primary:active { transform: scale(0.985); }
+/* One-shot pop when a set is logged (toggled by the submit handler). */
+.btn-primary.is-saved { animation: savedPop 0.4s ease; }
 .btn-secondary {
     background-color: #333;
     color: white;
@@ -486,6 +491,8 @@ input::-webkit-inner-spin-button {
     border-radius: var(--border-radius);
     border-left: 3px solid var(--accent-color);
 }
+/* Ease the timer in when it first appears (display:none → flex restarts this). */
+.rest-timer:not(.hidden) { animation: timerIn 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .timer-label  { color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; }
 .timer-body   { display: flex; flex-direction: column; align-items: center; gap: 1px; }
 .timer-display { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; }
@@ -744,4 +751,33 @@ input::-webkit-inner-spin-button {
 .input-error {
     border-color: var(--danger-color) !important;
     animation: shake 0.3s ease;
+}
+
+/* ── Log-flow micro-animations ──────────────────────────────────────────────
+   Slight, tasteful motion on the Log tab: the newly logged set drops into
+   "Today's Sets", the rest timer eases in, and the button pops on save.       */
+@keyframes setItemEnter {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+/* Applied only to the just-logged (top) row — see loadTodaySets(animateNewest). */
+.set-item-enter { animation: setItemEnter 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+@keyframes timerIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes savedPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.025); }
+    100% { transform: scale(1); }
+}
+
+/* Honor the OS "reduce motion" setting — drop every non-essential animation. */
+@media (prefers-reduced-motion: reduce) {
+    .set-item-enter,
+    .rest-timer:not(.hidden),
+    .btn-primary.is-saved,
+    .view:not(.hidden) { animation: none; }
 }

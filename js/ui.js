@@ -673,11 +673,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================================
     // 4. FORM SUBMISSION
     // =============================================
+    // Rate-limit the submit. The handler is async (it awaits DB writes), so a
+    // double-tap on "Log Set" fires a second submit before the first finishes and
+    // logs a DUPLICATE set. `logging` blocks concurrent submits; the cooldown
+    // drops rapid re-taps just after a save (visually covered by the 800ms
+    // "Saved!" state). try/finally guarantees the guard releases even on error.
+    let logging   = false;
+    let lastLogAt = 0;
+    const LOG_COOLDOWN_MS = 700;
+
     logForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         closeDropdown();
 
+        if (logging || Date.now() - lastLogAt < LOG_COOLDOWN_MS) return;
+
         // Require reps for all non-timed tracking; require duration for timed.
+        // (Invalid submits return before arming the guard/cooldown.)
         if (currentTracking !== 'timed' && (parseInt(repsInput.value) || 0) < 1) {
             repsInput.classList.add('input-error');
             repsInput.focus();
@@ -691,45 +703,62 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const set = {
-            exercise: exerciseInput.value.trim(),
-            weight:   parseFloat(weightInput.value) || 0,
-            reps:     parseInt(repsInput.value)     || 0,
-            notes:    notesInput.value.trim(),
-        };
-        if (currentTracking === 'timed')  set.duration  = parseInt(durationInput.value) || 0;
-        if (currentTracking === 'banded') set.bandLevel = currentBand;
+        logging = true;
+        try {
+            const set = {
+                exercise: exerciseInput.value.trim(),
+                weight:   parseFloat(weightInput.value) || 0,
+                reps:     parseInt(repsInput.value)     || 0,
+                notes:    notesInput.value.trim(),
+            };
+            if (currentTracking === 'timed')  set.duration  = parseInt(durationInput.value) || 0;
+            if (currentTracking === 'banded') set.bandLevel = currentBand;
 
-        await DB.addSet(set);
-        historyDirty = true; // new set logged — History must rebuild before next open
-        const lastSets   = await DB.getLastSessionAllSets(set.exercise);
-        const customWarn = avgIntraRestMs(lastSets, set.exercise) ?? WARN_MS;
-        startTimer(Date.now(), customWarn);
+            await DB.addSet(set);
+            lastLogAt = Date.now();   // arm the cooldown from the moment it's saved
+            historyDirty = true; // new set logged — History must rebuild before next open
+            const lastSets   = await DB.getLastSessionAllSets(set.exercise);
+            const customWarn = avgIntraRestMs(lastSets, set.exercise) ?? WARN_MS;
+            startTimer(Date.now(), customWarn);
 
-        notesInput.value = '';
+            notesInput.value = '';
 
-        await refreshExerciseCache();
+            await refreshExerciseCache();
 
-        const btn = logForm.querySelector('.btn-primary');
-        const originalText = btn.textContent;
-        btn.textContent = 'Saved!';
-        btn.style.backgroundColor = '#28a745';
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.backgroundColor = '';
-        }, 800);
+            const btn = logForm.querySelector('.btn-primary');
+            const originalText = btn.textContent;
+            btn.textContent = 'Saved!';
+            btn.style.backgroundColor = '#28a745';
+            btn.classList.remove('is-saved');
+            void btn.offsetWidth;            // restart the pop on rapid consecutive logs
+            btn.classList.add('is-saved');
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.backgroundColor = '';
+                btn.classList.remove('is-saved');
+            }, 800);
 
-        loadTodaySets();
+            loadTodaySets(true);
+        } finally {
+            logging = false;
+        }
     });
 
     // =============================================
     // 5. UI RENDERING
     // =============================================
-    async function loadTodaySets() {
+    // `animateNewest` plays the drop-in entrance on the top (just-logged) row.
+    // Only the log-form submit passes it — initial load, edits and deletes
+    // re-render silently so existing rows don't all re-animate.
+    async function loadTodaySets(animateNewest = false) {
         const sets = await DB.getTodaySets();
         const list = document.getElementById('today-list');
         list.innerHTML = '';
-        sets.forEach(set => list.appendChild(createSetElement(set)));
+        sets.forEach((set, i) => {
+            const el = createSetElement(set);
+            if (animateNewest && i === 0) el.classList.add('set-item-enter');
+            list.appendChild(el);
+        });
     }
 
     async function loadHistory() {
