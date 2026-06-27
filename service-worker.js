@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workout-pwa-v25'; // always increment for official updates
+const CACHE_NAME = 'workout-pwa-v26'; // always increment for official updates
 const ASSETS = [
     './',
     './index.html',
@@ -13,8 +13,8 @@ const ASSETS = [
     './icon-192.png',
     './icon-512.png',
     './favicon.ico',
-    'https://unpkg.com/dexie/dist/dexie.js',
-    'https://cdn.jsdelivr.net/npm/chart.js'
+    './js/lib/dexie.min.js',
+    './js/lib/chart.umd.js'
 ];
 
 // Let the page ask which cache (i.e. which deploy) is actually serving it, so

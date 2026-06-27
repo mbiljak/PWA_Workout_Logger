@@ -7,6 +7,23 @@ window.step = (id, amount) => {
     el.value = clampZero ? Math.max(0, newVal) : newVal;
 };
 
+// Chart.js (~200KB) is only needed for the Analysis trend chart. Load it on
+// demand the first time a chart renders so it costs nothing at launch. The file
+// is in the service-worker precache, so it's available offline after install.
+let _chartLoader = null;
+function ensureChart() {
+    if (window.Chart) return Promise.resolve();
+    if (_chartLoader) return _chartLoader;
+    _chartLoader = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'js/lib/chart.umd.js';
+        s.onload = () => resolve();
+        s.onerror = () => { _chartLoader = null; reject(new Error('Chart.js failed to load')); };
+        document.head.appendChild(s);
+    });
+    return _chartLoader;
+}
+
 // ── DOMAIN MATH ───────────────────────────────────────────────────────────────
 // Hoisted out of the UI closure: no DOM dependencies, independently testable.
 
@@ -1221,6 +1238,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cat    = getCategory(exerciseName);
         const accent = cat === 'push' ? '#ff6b6b' : cat === 'pull' ? '#4dabf7' : cat === 'legs' ? '#69db7c' : '#007bff';
 
+        await ensureChart(); // lazy-load Chart.js on first use
         if (analysisChart) { analysisChart.destroy(); }
 
         analysisChart = new Chart(canvas, {

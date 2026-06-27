@@ -14,9 +14,10 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     
     <link rel="stylesheet" href="css/style.css">
-    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
-    <!-- Chart.js is only needed in the Analysis view; defer it so it never blocks first paint. -->
-    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Dexie is self-hosted and `defer`red so it downloads during head parse but
+         never blocks first paint. Chart.js is NOT loaded here — it's ~200KB and
+         only needed in Analysis, so ui.js loads it on demand (see ensureChart). -->
+    <script defer src="js/lib/dexie.min.js"></script>
 </head>
 <body>
     <main>
@@ -308,11 +309,13 @@
             <span class="nav-label">Backup</span>
         </button>
     </nav>
-    <script src="js/exercises.js"></script>
-    <script src="js/muscles.js"></script>
-    <script src="js/db.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/export.js"></script>
+    <!-- `defer`: parse + paint the UI first, then run these in document order
+         (after the deferred Dexie above) just before DOMContentLoaded. -->
+    <script defer src="js/exercises.js"></script>
+    <script defer src="js/muscles.js"></script>
+    <script defer src="js/db.js"></script>
+    <script defer src="js/ui.js"></script>
+    <script defer src="js/export.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             // updateViaCache:'none' = always re-check the SW script over the network
