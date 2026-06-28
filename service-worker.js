@@ -1,4 +1,6 @@
-const CACHE_NAME = 'workout-pwa-v32'; // always increment for official updates
+// Versioning moved to a 1.x scheme to leave room for a v2. Always increment for
+// official updates (forces the precache to refresh).
+const CACHE_NAME = 'workout-pwa-v1.33';
 const ASSETS = [
     './',
     './index.html',
@@ -8,7 +10,6 @@ const ASSETS = [
     './js/db.js',
     './js/ui.js',
     './js/export.js',
-    './data.csv',
     './manifest.json',
     './icon-192.png',
     './icon-512.png',

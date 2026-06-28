@@ -91,6 +91,27 @@ function bodyweightAt(timestamp) {
     return bw;
 }
 
+// ── WEIGHT UNIT (display only) ──────────────────────────────────────────────
+// Data is ALWAYS stored canonical in lbs — the unit preference only changes how
+// weights are SHOWN and how typed values are interpreted, so there is no data
+// migration and backups stay unit-agnostic. All domain math (e1rm, increments,
+// BAND_LOAD, volume) keeps running in lbs; only labels and edge values convert.
+const LB_PER_KG = 2.2046226218;
+function getUnit()    { return localStorage.getItem('weight_unit') === 'kg' ? 'kg' : 'lbs'; }
+function unitLabel()  { return getUnit(); }
+function shortUnit()  { return getUnit() === 'kg' ? 'kg' : 'lb'; }
+function toLbs(display) { return getUnit() === 'kg' ? (display || 0) * LB_PER_KG : (display || 0); }
+function fromLbs(lbs)   { return getUnit() === 'kg' ? (lbs || 0) / LB_PER_KG : (lbs || 0); }
+// Tidy display number: ≤1 decimal, no trailing ".0".
+function fmtNum(n) {
+    const r = Math.round((n || 0) * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+// Numeric value (2 dp) for an INPUT field, in the user's unit.
+function dispWeight(lbs) { return Math.round(fromLbs(lbs) * 100) / 100; }
+// "<n> <unit>" for display text, e.g. "135 lbs" / "61.2 kg".
+function fmtWeight(lbs) { return `${fmtNum(fromLbs(lbs))} ${unitLabel()}`; }
+
 // Tracking type for a logged set.
 function trackingOf(set) {
     return getDef(set.exercise)?.tracking || 'weighted';
@@ -104,13 +125,13 @@ function fmtDuration(sec) {
 function formatSet(set) {
     switch (trackingOf(set)) {
         case 'timed':
-            return `${fmtDuration(set.duration)}${set.weight ? ` + ${set.weight} lbs` : ''}`;
+            return `${fmtDuration(set.duration)}${set.weight ? ` + ${fmtWeight(set.weight)}` : ''}`;
         case 'banded':
             return `${set.reps} reps · ${set.bandLevel || 'medium'} band`;
         case 'bodyweight':
-            return `${set.reps} reps${set.weight ? ` + ${set.weight} lbs` : ''}`;
+            return `${set.reps} reps${set.weight ? ` + ${fmtWeight(set.weight)}` : ''}`;
         default:
-            return `${set.weight} lbs × ${set.reps} reps`;
+            return `${fmtWeight(set.weight)} × ${set.reps} reps`;
     }
 }
 
@@ -121,9 +142,9 @@ function formatSetShort(set) {
         case 'banded':
             return `${set.reps} (${(set.bandLevel || 'med').slice(0,3)})`;
         case 'bodyweight':
-            return `${set.reps}${set.weight ? `+${set.weight}` : ''}`;
+            return `${set.reps}${set.weight ? `+${fmtNum(fromLbs(set.weight))}` : ''}`;
         default:
-            return `${set.weight}lb × ${set.reps}`;
+            return `${fmtNum(fromLbs(set.weight))}${shortUnit()} × ${set.reps}`;
     }
 }
 
@@ -273,7 +294,7 @@ function predictNextTarget(sets, tracking, increment) {
     const anyAdded = sets.some(s => (s.weight || 0) > 0);
     if (tracking === 'bodyweight' && !anyAdded) {
         if (lastReps >= 20)
-            return { lastLabel: `${lastReps} reps`, nextLabel: `+${increment} lbs`,
+            return { lastLabel: `${lastReps} reps`, nextLabel: `+${fmtWeight(increment)}`,
                      basis: 'add load',
                      metric: 'reps', target: lastReps + 1 };
         return { lastLabel: `${lastReps} reps`, nextLabel: `${lastReps + 1} reps`,
@@ -285,14 +306,14 @@ function predictNextTarget(sets, tracking, increment) {
     const repsAtW = sets.filter(s => (s.weight || 0) === topW && (s.reps || 0) > 0).map(s => s.reps);
     const repHi = repsAtW.length ? Math.max(...repsAtW) : lastReps;
     const repLo = repsAtW.length ? Math.min(...repsAtW) : Math.max(1, lastReps - 4);
-    const wLabel = (w) => tracking === 'bodyweight' ? `BW+${w} lbs` : `${w} lbs`;
+    const wLabel = (w) => tracking === 'bodyweight' ? `BW+${fmtWeight(w)}` : `${fmtWeight(w)}`;
 
     if (lastReps >= repHi) {
         const nextW = topW + increment;
         return {
             lastLabel: `${wLabel(topW)} × ${lastReps}`,
             nextLabel: `${wLabel(nextW)} × ${repLo}`,
-            basis: `+${increment} lbs · reset reps`,
+            basis: `+${fmtWeight(increment)} · reset reps`,
             metric: 'e1rm', target: e1rm(nextW, repLo)
         };
     }
@@ -408,9 +429,10 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 
     // --- INITIALIZATION ---
+    // Fresh installs start with an empty log (only the generic exercise library is
+    // seeded). There is no developer-data auto-import — each user's data is their own.
     DB.seedExercises()
         .then(loadExerciseDefs)
-        .then(autoImportCSV)
         .then(refreshExerciseCache);
     loadTodaySets();
 
@@ -591,7 +613,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function selectExercise(item) {
         exerciseInput.value = item.name;
         applyTracking(item.def);
-        if (item.lastWeight !== null) weightInput.value = item.lastWeight;
+        if (item.lastWeight !== null) weightInput.value = dispWeight(item.lastWeight);
         if (item.lastReps   !== null) repsInput.value   = item.lastReps;
         closeDropdown();
         loadImproveCtx(item.name); // refresh the "vs last session" comparison
@@ -604,7 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isTimed    = currentTracking === 'timed';
 
         groupWeight.classList.toggle('hidden', isBanded);
-        weightLabel.textContent = isWeighted ? 'Weight (lbs)' : 'Added weight (lbs)';
+        weightLabel.textContent = `${isWeighted ? 'Weight' : 'Added weight'} (${unitLabel()})`;
         groupReps.classList.toggle('hidden', isTimed);
         groupDuration.classList.toggle('hidden', !isTimed);
         groupBand.classList.toggle('hidden', !isBanded);
@@ -645,7 +667,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function currentFormSet() {
         return {
-            weight:    parseFloat(weightInput.value)  || 0,
+            weight:    toLbs(parseFloat(weightInput.value) || 0),
             reps:      parseInt(repsInput.value)       || 0,
             duration:  parseInt(durationInput.value)   || 0,
             bandLevel: currentBand,
@@ -750,57 +772,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // =============================================
-    // 3. DATA IMPORT (one-time from codebase)
-    // =============================================
-    async function autoImportCSV() {
-        if (localStorage.getItem('sample_data_imported')) return;
-        try {
-            const response = await fetch('./data.csv');
-            if (!response.ok) return;
-            const csvText = await response.text();
-            const lines = csvText.split('\n');
-            const currentYear = new Date().getFullYear();
-            const MONTHS = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-
-            for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-
-                const cols     = line.split(',');
-                const timeStr  = cols[0]?.trim();
-                const exercise = cols[1]?.trim();
-                const reps     = parseInt(cols[2]);
-                const weight   = parseFloat(cols[3]);
-                if (!timeStr || !exercise) continue;
-
-                const [datePart, timePart = '00:00'] = timeStr.split(' ');
-                const [monthStr, dayStr]  = datePart.split('-');
-                const [hours, minutes]    = timePart.split(':').map(Number);
-                const monthIdx = MONTHS[monthStr.toLowerCase().slice(0, 3)];
-                const day      = parseInt(dayStr);
-
-                if (monthIdx === undefined || isNaN(day)) continue;
-
-                const timestamp = new Date(currentYear, monthIdx, day, hours, minutes).getTime();
-
-                await DB.importSet({
-                    exercise,
-                    reps:   isNaN(reps)   ? 0 : reps,
-                    weight: isNaN(weight) ? 0 : weight,
-                    notes:  'Imported from CSV',
-                    timestamp,
-                });
-            }
-            localStorage.setItem('sample_data_imported', 'true');
-            historyDirty = true; // imported sets must show even if History was warmed first
-            await refreshExerciseCache();
-            loadTodaySets();
-        } catch (err) {
-            console.error('Auto-import failed:', err);
-        }
-    }
-
-    // =============================================
     // 4. FORM SUBMISSION
     // =============================================
     // Rate-limit the submit. The handler is async (it awaits DB writes), so a
@@ -837,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const set = {
                 exercise: exerciseInput.value.trim(),
-                weight:   parseFloat(weightInput.value) || 0,
+                weight:   toLbs(parseFloat(weightInput.value) || 0), // store canonical lbs
                 reps:     parseInt(repsInput.value)     || 0,
                 notes:    '', // notes are added later via the edit-set modal
             };
@@ -926,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { v: computeStreak(),     l: 'Day streak'   },
             { v: thisMonth,           l: 'This month'   },
             { v: trainedDays.size,    l: 'Days trained' },
-            { v: fmtVol(totalVolume), l: 'Total lbs'   },
+            { v: fmtVol(fromLbs(totalVolume)), l: `Total ${unitLabel()}` },
         ].map(s => `<div class="stat-card"><div class="stat-value">${s.v}</div><div class="stat-label">${s.l}</div></div>`).join('');
         container.appendChild(statsRow);
 
@@ -1178,7 +1149,7 @@ document.addEventListener('DOMContentLoaded', () => {
             visible.forEach((day, i) => {
                 const setsAsc = [...day.sets].sort((a, b) => a.timestamp - b.timestamp);
                 const exNames = [...new Set(setsAsc.map(s => s.exercise))];
-                const vol     = Math.round(day.sets.reduce((a, s) => a + setVolume(s), 0)).toLocaleString();
+                const vol     = Math.round(fromLbs(day.sets.reduce((a, s) => a + setVolume(s), 0))).toLocaleString();
                 const label   = new Date(setsAsc[0].timestamp).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
                 // GTG/category derived from the day's actual training, not a flag.
@@ -1211,7 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="session-header">
                         <div>
                             <div class="session-title">${label} ${catTag}${gtgTag}</div>
-                            <div class="session-summary">${exNames.length} exercise${exNames.length !== 1 ? 's' : ''} · ${setsAsc.length} set${setsAsc.length !== 1 ? 's' : ''} · ${vol} lbs</div>
+                            <div class="session-summary">${exNames.length} exercise${exNames.length !== 1 ? 's' : ''} · ${setsAsc.length} set${setsAsc.length !== 1 ? 's' : ''} · ${vol} ${unitLabel()}</div>
                         </div>
                         <span class="session-toggle">⌄</span>
                     </div>
@@ -1311,9 +1282,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('set-group-reps').classList.toggle('hidden', isTimed);
         document.getElementById('set-group-duration').classList.toggle('hidden', !isTimed);
         document.getElementById('set-group-band').classList.toggle('hidden', !isBanded);
-        setWeightLabel.textContent = isWeighted ? 'Weight (lbs)' : 'Added weight (lbs)';
+        setWeightLabel.textContent = `${isWeighted ? 'Weight' : 'Added weight'} (${unitLabel()})`;
 
-        setWeightInput.value = set.weight  ?? 0;
+        setWeightInput.value = dispWeight(set.weight ?? 0);
         setRepsInput.value   = set.reps    ?? 0;
         setDurInput.value    = set.duration ?? 0;
         setNotesInput.value  = set.notes   || '';
@@ -1354,7 +1325,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const changes = {
-            weight: parseFloat(setWeightInput.value) || 0,
+            weight: toLbs(parseFloat(setWeightInput.value) || 0), // store canonical lbs
             reps:   parseInt(setRepsInput.value) || 0,
             notes:  setNotesInput.value.trim(),
         };
@@ -1444,27 +1415,27 @@ document.addEventListener('DOMContentLoaded', () => {
             lineLabel = 'Best hold (s)'; lineAxis = 'Seconds';
             barLabel  = 'Total time (s)'; barAxis = 'Total seconds';
             const prSet = sets.reduce((b, s) => (s.duration||0) > (b.duration||0) ? s : b);
-            prHtml = `<span class="pr-set">${fmtDuration(prSet.duration)}${prSet.weight ? ` + ${prSet.weight} lbs` : ''}</span>
+            prHtml = `<span class="pr-set">${fmtDuration(prSet.duration)}${prSet.weight ? ` + ${fmtWeight(prSet.weight)}` : ''}</span>
                       <span class="pr-e1rm">Longest hold · ${dated(prSet.timestamp)}</span>`;
         } else if (useE1rm) {
             lineData = sessions.map(([, s]) => {
                 const vals = s.sets.map(x => e1rm(loadAt(x), x.reps));
-                return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+                return Math.round(fromLbs(vals.reduce((a, b) => a + b, 0) / vals.length));
             });
-            barData   = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + loadAt(x) * x.reps, 0)));
-            lineLabel = 'Avg e1RM (lbs)'; lineAxis = 'e1RM (lbs)';
-            barLabel  = 'Volume (lbs)';   barAxis  = 'Volume (lbs)';
+            barData   = sessions.map(([, s]) => Math.round(fromLbs(s.sets.reduce((a, x) => a + loadAt(x) * x.reps, 0))));
+            lineLabel = `Avg e1RM (${unitLabel()})`; lineAxis = `e1RM (${unitLabel()})`;
+            barLabel  = `Volume (${unitLabel()})`;   barAxis  = `Volume (${unitLabel()})`;
             const prSet = sets.reduce((b, s) => e1rm(loadAt(s), s.reps) > e1rm(loadAt(b), b.reps) ? s : b);
             const prVal = Math.round(e1rm(loadAt(prSet), prSet.reps));
             const bwNote = (tracking === 'bodyweight' && !getBodyweight())
                 ? ` <span class="pr-warn">Set your bodyweight in Settings</span>` : '';
             prHtml = `<span class="pr-set">${formatSet(prSet)}</span>
-                      <span class="pr-e1rm">e1RM: ${prVal} lbs · ${dated(prSet.timestamp)}</span>${bwNote}`;
+                      <span class="pr-e1rm">e1RM: ${fmtWeight(prVal)} · ${dated(prSet.timestamp)}</span>${bwNote}`;
         } else {
             lineData  = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + (x.reps||0), 0) / s.sets.length));
-            barData   = sessions.map(([, s]) => Math.round(s.sets.reduce((a, x) => a + loadAt(x) * (x.reps||0), 0)));
+            barData   = sessions.map(([, s]) => Math.round(fromLbs(s.sets.reduce((a, x) => a + loadAt(x) * (x.reps||0), 0))));
             lineLabel = 'Avg reps'; lineAxis = 'Reps';
-            barLabel  = 'Volume (lbs)'; barAxis = 'Volume (lbs)';
+            barLabel  = `Volume (${unitLabel()})`; barAxis = `Volume (${unitLabel()})`;
             const prSet = sets.reduce((b, s) => (s.reps||0) > (b.reps||0) ? s : b);
             const bwNote = !getBodyweight()
                 ? ` <span class="pr-warn">Set your bodyweight in Settings for volume</span>` : '';
@@ -1661,7 +1632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pt = e.touches ? e.touches[0] : e;
         muscleTip.innerHTML =
             `<div class="mt-name">${MUSCLE_LABELS[slug] || slug}</div>` +
-            `<div class="mt-stat">${Math.round(s.lbs).toLocaleString()} lbs · ${s.sets} set${s.sets !== 1 ? 's' : ''}</div>`;
+            `<div class="mt-stat">${Math.round(fromLbs(s.lbs)).toLocaleString()} ${unitLabel()} · ${s.sets} set${s.sets !== 1 ? 's' : ''}</div>`;
         muscleTip.classList.remove('hidden');
         const x = Math.min(pt.clientX + 12, window.innerWidth - 160);
         const y = Math.max(pt.clientY - 10, 10);
@@ -1735,16 +1706,94 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function initBodyweight() {
         const bw = getBodyweight();
-        if (bw) bodyweightInput.value = bw;
+        bodyweightInput.value = bw ? dispWeight(bw) : '';
     }
     initBodyweight();
     bodyweightInput.addEventListener('change', () => {
-        const v = parseFloat(bodyweightInput.value) || 0;
+        const v = toLbs(parseFloat(bodyweightInput.value) || 0); // store canonical lbs
         recordBodyweight(v);
         const sel = document.getElementById('analysis-exercise');
         if (sel.value && !document.getElementById('view-analysis').classList.contains('hidden'))
             renderAnalysis(sel.value);
     });
+
+    // =============================================
+    // 5b-ii. WEIGHT UNIT (lbs / kg)
+    // =============================================
+    // Switching units only changes display + how inputs are read — stored data is
+    // canonical lbs, so every view just re-renders. Reuses refreshSetViews (which
+    // refreshes Today, marks History dirty + rebuilds it if open) and re-renders
+    // Analysis when visible.
+    const unitToggle = document.getElementById('unit-toggle');
+    const bwUnitLabel = document.getElementById('bw-unit-label');
+
+    function reflectUnitToggle() {
+        unitToggle.querySelectorAll('.seg-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.unit === getUnit()));
+    }
+
+    // Apply the current unit across the always-visible chrome (labels) + data views.
+    function refreshUnitUI(prevUnit) {
+        weightLabel.textContent = `${currentTracking === 'weighted' ? 'Weight' : 'Added weight'} (${unitLabel()})`;
+        if (bwUnitLabel) bwUnitLabel.textContent = unitLabel();
+        initBodyweight();
+        // Re-interpret any value already typed in the log weight field.
+        if (prevUnit && prevUnit !== getUnit() && weightInput.value !== '') {
+            const asLbs = prevUnit === 'kg' ? (parseFloat(weightInput.value) || 0) * LB_PER_KG : (parseFloat(weightInput.value) || 0);
+            weightInput.value = getUnit() === 'kg' ? Math.round(asLbs / LB_PER_KG * 100) / 100 : Math.round(asLbs * 100) / 100;
+        }
+        refreshSetViews();
+        const sel = document.getElementById('analysis-exercise');
+        if (sel && sel.value && !document.getElementById('view-analysis').classList.contains('hidden'))
+            renderAnalysis(sel.value);
+    }
+
+    reflectUnitToggle();
+    refreshUnitUI(); // set initial labels for the chosen unit on load
+    unitToggle.querySelectorAll('.seg-btn').forEach(btn => {
+        const pick = (e) => {
+            e.preventDefault();
+            const prev = getUnit();
+            if (btn.dataset.unit === prev) return;
+            localStorage.setItem('weight_unit', btn.dataset.unit);
+            reflectUnitToggle();
+            refreshUnitUI(prev);
+        };
+        btn.addEventListener('touchend', pick);
+        btn.addEventListener('click', pick);
+    });
+
+    // =============================================
+    // 5b-iii. FIRST-RUN ONBOARDING
+    // =============================================
+    (function onboarding() {
+        if (localStorage.getItem('onboarded')) return;
+        const modal   = document.getElementById('onboard-modal');
+        const unitSeg = document.getElementById('onboard-unit');
+        const bwIn    = document.getElementById('onboard-bw');
+        if (!modal) return;
+        let chosenUnit = 'lbs';
+        unitSeg.querySelectorAll('.seg-btn').forEach(btn => {
+            const pick = (e) => {
+                e.preventDefault();
+                chosenUnit = btn.dataset.unit;
+                unitSeg.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+                bwIn.placeholder = chosenUnit === 'kg' ? 'e.g. 80' : 'e.g. 175';
+            };
+            btn.addEventListener('touchend', pick);
+            btn.addEventListener('click', pick);
+        });
+        modal.classList.remove('hidden');
+        document.getElementById('onboard-done').addEventListener('click', () => {
+            localStorage.setItem('weight_unit', chosenUnit);
+            const v = parseFloat(bwIn.value);
+            if (v > 0) recordBodyweight(chosenUnit === 'kg' ? v * LB_PER_KG : v);
+            localStorage.setItem('onboarded', 'true');
+            modal.classList.add('hidden');
+            reflectUnitToggle();
+            refreshUnitUI('lbs');
+        });
+    })();
 
     // =============================================
     // 5c. ADD / EDIT EXERCISE MODAL

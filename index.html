@@ -116,24 +116,30 @@
             <div class="backup-container">
                 <h2>Settings</h2>
                 <div class="input-group">
-                    <label for="bodyweight">Bodyweight (lbs)</label>
+                    <label>Units</label>
+                    <div class="segmented" id="unit-toggle">
+                        <button type="button" class="seg-btn" data-unit="lbs">lbs</button>
+                        <button type="button" class="seg-btn" data-unit="kg">kg</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="bodyweight">Bodyweight (<span id="bw-unit-label">lbs</span>)</label>
                     <input type="number" id="bodyweight" step="0.5" inputmode="decimal" placeholder="e.g. 175">
                     <small style="color:var(--text-secondary)">Used to estimate strength on bodyweight exercises (pushups, pull-ups…).</small>
                 </div>
 
-                <h2 style="margin-top:24px;">Exercises</h2>
-                <button id="btn-add-exercise" class="btn-secondary">+ New Exercise</button>
-                <div id="exercise-manage-list" class="exercise-manage-list"></div>
-
-                <h2 style="margin-top:24px;">Export Data</h2>
-                <p>Save your workout history locally.</p>
-                <button id="btn-export-json" class="btn-secondary">Export JSON</button>
+                <h2 style="margin-top:24px;">Backup</h2>
+                <p>Your data lives only on this device — export a backup now and then so a lost or wiped phone doesn't lose your history.</p>
+                <p id="backup-status" class="backup-status"></p>
+                <button id="btn-export-json" class="btn-secondary">Export / Back Up</button>
                 <button id="btn-export-csv" class="btn-secondary">Export CSV</button>
-
-                <h2 style="margin-top:24px;">Restore</h2>
-                <p style="color:var(--text-secondary)">Loading a JSON backup <strong>replaces all current data</strong>. Export first if unsure.</p>
+                <p style="color:var(--text-secondary); margin-top:14px;">Restoring a backup <strong>replaces all current data</strong>. Export first if unsure.</p>
                 <button id="btn-import-json" class="btn-secondary">Import / Restore Backup</button>
                 <input type="file" id="import-file" accept="application/json,.json" style="display:none">
+
+                <h2 style="margin-top:28px;">Exercises</h2>
+                <button id="btn-add-exercise" class="btn-secondary">+ New Exercise</button>
+                <div id="exercise-manage-list" class="exercise-manage-list"></div>
 
                 <p id="app-version" class="app-version">Version —</p>
             </div>
@@ -183,6 +189,29 @@
             </div>
         </section>
     </main>
+
+    <!-- First-run onboarding -->
+    <div id="onboard-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <h2>Welcome 👋</h2>
+            <p style="color:var(--text-secondary); margin-bottom:18px;">Log your sets, track progress, and watch your strength trends. Everything stays on this device — export a backup from Settings now and then to keep it safe.</p>
+            <div class="input-group">
+                <label>Preferred units</label>
+                <div class="segmented" id="onboard-unit">
+                    <button type="button" class="seg-btn active" data-unit="lbs">lbs</button>
+                    <button type="button" class="seg-btn" data-unit="kg">kg</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label for="onboard-bw">Bodyweight (optional)</label>
+                <input type="number" id="onboard-bw" step="0.5" inputmode="decimal" placeholder="e.g. 175">
+                <small style="color:var(--text-secondary)">Used to estimate strength on bodyweight moves (pull-ups, dips…). You can set or change this later in Settings.</small>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-primary" id="onboard-done" style="width:100%">Get started</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Add / edit exercise modal -->
     <div id="exercise-modal" class="modal-overlay hidden">

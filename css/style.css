@@ -68,6 +68,14 @@ main {
     opacity: 0.7;
 }
 
+.backup-status {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 4px 0 8px;
+}
+.backup-status:empty { display: none; }
+.backup-status.warn { color: var(--danger-color); }
+
 /* Forms */
 form {
     background-color: var(--surface-color);
