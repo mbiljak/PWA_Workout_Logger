@@ -247,8 +247,9 @@ button {
     background-color: #3d3d3d;
     color: white;
     font-size: 1.5rem;
-    width: 50px;
+    width: 44px;
     height: 50px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -264,7 +265,13 @@ button {
     border-radius: 0;
     text-align: center;
     flex: 1;
-    font-size: 1.2rem;
+    /* Narrow side padding + tabular figures so 3–4 digit weights (incl. ".5")
+       fit without being clipped by the +/- buttons. */
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 1.1rem;
+    font-variant-numeric: tabular-nums;
     background: transparent;
 }
 
@@ -381,6 +388,51 @@ input::-webkit-inner-spin-button {
     font-size: 0.9rem;
     text-align: center;
 }
+
+/* ── Improvement bar (Log form) ──────────────────────────────────────────────
+   Diverging bar: centre = parity with the same-order set last session, fill to
+   the right for a gain (green), to the left for a regression (red).            */
+.improve-bar {
+    background: #2c2c2c;
+    border-radius: var(--border-radius);
+    padding: 10px 12px 12px;
+    margin-bottom: 12px;
+}
+.improve-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.improve-pct { font-size: 1rem; font-weight: 700; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.improve-set { font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
+.improve-track {
+    position: relative;
+    height: 10px;
+    background: #1c1c1c;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.improve-center {
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: rgba(255, 255, 255, 0.22);
+    z-index: 1;
+}
+.improve-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 0;
+    border-radius: 999px;
+    background: var(--text-secondary);
+    transition: width 0.25s ease, left 0.25s ease, right 0.25s ease, background-color 0.2s ease;
+}
+.improve-sub { font-size: 0.75rem; color: var(--text-secondary); margin-top: 7px; }
+
+.improve-bar[data-state="up"]   .improve-pct  { color: #69db7c; }
+.improve-bar[data-state="up"]   .improve-fill { background: #69db7c; }
+.improve-bar[data-state="down"] .improve-pct  { color: #ff6b6b; }
+.improve-bar[data-state="down"] .improve-fill { background: #ff6b6b; }
+.improve-bar[data-state="new"]  .improve-pct,
+.improve-bar[data-state="even"] .improve-pct  { color: #4dabf7; }
+
 /* ── History v3 ── */
 
 /* Summary stats */
@@ -389,17 +441,83 @@ input::-webkit-inner-spin-button {
 .stat-value { font-size:1.35rem; font-weight:700; }
 .stat-label { color:var(--text-secondary); font-size:0.7rem; margin-top:2px; text-transform:uppercase; letter-spacing:0.4px; }
 
-/* Heatmap — GitHub-style week grid (7 weekday rows × week columns) */
-.heat-wrap { background:var(--surface-color); border-radius:var(--border-radius); padding:12px; margin-bottom:8px; overflow-x:auto; scrollbar-width:none; }
-.heat-wrap::-webkit-scrollbar { display:none; }
-.heat-months { display:grid; grid-auto-flow:column; grid-auto-columns:13px; gap:3px; margin-bottom:4px; }
+/* Heatmap header: ‹ window-label › time nav (left) + iOS-style range slider (right) */
+.heat-controls { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.heat-nav { display:flex; align-items:center; gap:4px; }
+.heat-arrow {
+    width:30px; height:30px;
+    min-height:0; padding:0; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    background:#2c2c2c; color:var(--text-primary);
+    border:none; border-radius:50%;
+    font-size:1.2rem; line-height:1;
+    transition:background-color 0.15s ease, opacity 0.15s ease;
+}
+.heat-arrow:active { background:var(--accent-color); }
+.heat-arrow.is-disabled { opacity:0.3; pointer-events:none; }
+.heat-range-label {
+    min-width:104px;
+    text-align:center;
+    color:var(--text-primary);
+    font-size:0.85rem; font-weight:600;
+    font-variant-numeric:tabular-nums;
+}
+.heat-range {
+    position:relative;
+    display:flex;
+    width:124px;
+    flex-shrink:0;
+    background:#2c2c2c;
+    border-radius:999px;
+    padding:3px;
+    -webkit-user-select:none;
+    user-select:none;
+}
+.heat-range .hr-thumb {
+    position:absolute;
+    top:3px; bottom:3px; left:3px;
+    width:calc((100% - 6px) / 2);
+    background:var(--accent-color);
+    border-radius:999px;
+    z-index:0;
+    transition:transform 0.28s cubic-bezier(0.2,0.8,0.2,1);
+}
+.heat-range button {
+    position:relative;
+    z-index:1;
+    flex:1;
+    min-height:0;
+    padding:7px 0;
+    background:none;
+    border:none;
+    color:var(--text-secondary);
+    font-size:0.78rem;
+    font-weight:600;
+    letter-spacing:0.3px;
+    transition:color 0.2s ease;
+}
+.heat-range button.active { color:#fff; }
+
+/* Heatmap — GitHub-style week grid (7 weekday rows × week columns).
+   Cell size (--cell) and gap (--gap) are set per-render in JS so the whole grid
+   always fits the card width; the grid is centred and never scrolls. */
+.heat-wrap { background:var(--surface-color); border-radius:var(--border-radius); padding:12px; margin-bottom:8px; overflow:hidden; }
+.heat-months { display:grid; grid-auto-flow:column; grid-auto-columns:var(--cell,13px); gap:var(--gap,3px); justify-content:center; margin-bottom:4px; }
 .heat-months span { font-size:9px; color:var(--text-secondary); white-space:nowrap; overflow:visible; }
-.heatmap { display:grid; grid-template-rows:repeat(7,13px); grid-auto-flow:column; grid-auto-columns:13px; gap:3px; }
-.heat-cell { position:relative; width:13px; height:13px; border-radius:2px; background:#2c2c2c; cursor:pointer; transition:opacity 0.15s; }
+.heatmap { display:grid; grid-template-rows:repeat(7,var(--cell,13px)); grid-auto-flow:column; grid-auto-columns:var(--cell,13px); gap:var(--gap,3px); justify-content:center; }
+.heat-cell { position:relative; width:100%; height:100%; min-width:0; border-radius:2px; background:#2c2c2c; cursor:pointer; transition:opacity 0.15s; }
 .heat-cell:active { opacity: 0.6; }
 .heat-cell.selected { outline: 2px solid #fff; outline-offset: 1px; }
 .heat-cell.heat-today { box-shadow: 0 0 0 1.5px var(--accent-color); }
 .heat-future { visibility:hidden; }
+
+/* Wave-in: each square grows from nothing; staggered delays (set inline per cell)
+   make a wave sweep across the grid when the range changes / History opens. */
+@keyframes heatCellIn {
+    from { transform: scale(0); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+}
+.heat-cell.heat-animate { animation: heatCellIn 0.5s cubic-bezier(0.2,0.8,0.2,1) backwards; }
 .heat-push  { background: #c0392b; }
 .heat-pull  { background: #2471a3; }
 .heat-legs  { background: #1e8449; }
@@ -413,7 +531,8 @@ input::-webkit-inner-spin-button {
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 6px; height: 6px;
+    /* Scales down with the cell so it never spills out of tiny (1Y) squares. */
+    width: min(6px, 55%); height: min(6px, 55%);
     border-radius: 50%;
     background: var(--gtg-dot, rgba(255,255,255,0.9));
     pointer-events: none;
@@ -560,6 +679,7 @@ input::-webkit-inner-spin-button {
 .pr-label  { font-size: 0.75rem; color: gold; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .pr-set    { font-size: 1.4rem; font-weight: 700; }
 .pr-e1rm   { font-size: 0.85rem; color: var(--text-secondary); }
+.pr-warn   { font-size: 0.8rem; color: #ffb454; font-weight: 600; }
 
 .chart-wrap {
     background: var(--surface-color);
@@ -595,8 +715,11 @@ input::-webkit-inner-spin-button {
 
 /* Flat per-exercise set log */
 .set-log-analysis { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
-.set-log-title { font-size: 0.75rem; color: var(--text-secondary); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+.set-log-title { font-size: 0.75rem; color: var(--text-secondary); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: baseline; gap: 8px; }
+.set-log-scale { font-weight: 600; letter-spacing: 0; text-transform: none; opacity: 0.7; }
 .set-log-row {
+    position: relative;
+    overflow: hidden;
     display: grid;
     grid-template-columns: 56px 1fr auto;
     align-items: baseline;
@@ -611,10 +734,16 @@ input::-webkit-inner-spin-button {
 .set-log-row[data-cat="pull"] { border-left-color: #4dabf7; }
 .set-log-row[data-cat="legs"] { border-left-color: #69db7c; }
 .set-log-row[data-cat="core"] { border-left-color: #b197fc; }
-.sl-date  { color: var(--text-secondary); font-size: 0.8rem; }
-.sl-set   { font-weight: 600; }
-.sl-e1rm  { color: var(--text-secondary); font-size: 0.8rem; text-align: right; }
-.sl-notes { grid-column: 2 / 4; color: var(--text-secondary); font-size: 0.8rem; font-style: italic; }
+/* Proportional scale bar behind each row (e1RM / metric vs. the list max) */
+.sl-fill { position: absolute; left: 0; top: 0; bottom: 0; z-index: 0; background: #888; opacity: 0.16; }
+.set-log-row[data-cat="push"] .sl-fill { background: #ff6b6b; }
+.set-log-row[data-cat="pull"] .sl-fill { background: #4dabf7; }
+.set-log-row[data-cat="legs"] .sl-fill { background: #69db7c; }
+.set-log-row[data-cat="core"] .sl-fill { background: #b197fc; }
+.sl-date  { position: relative; z-index: 1; color: var(--text-secondary); font-size: 0.8rem; }
+.sl-set   { position: relative; z-index: 1; font-weight: 600; }
+.sl-e1rm  { position: relative; z-index: 1; color: var(--text-secondary); font-size: 0.8rem; text-align: right; }
+.sl-notes { position: relative; z-index: 1; grid-column: 2 / 4; color: var(--text-secondary); font-size: 0.8rem; font-style: italic; }
 
 .analysis-empty {
     padding: 40px 20px;
@@ -779,5 +908,6 @@ input::-webkit-inner-spin-button {
     .set-item-enter,
     .rest-timer:not(.hidden),
     .btn-primary.is-saved,
+    .heat-cell.heat-animate,
     .view:not(.hidden) { animation: none; }
 }

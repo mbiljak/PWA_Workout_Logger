@@ -77,9 +77,19 @@
                     </div>
                 </div>
 
-                <div class="input-group">
-                    <label for="notes">Notes (optional)</label>
-                    <input type="text" id="notes" autocomplete="off" enterkeyhint="done" placeholder="Felt heavy...">
+                <!-- Improvement bar — how this set compares to the same-order set
+                     of the previous session (e1RM delta). Replaces the old notes
+                     field; notes now live in the edit-set modal. -->
+                <div class="improve-bar hidden" id="improve-bar">
+                    <div class="improve-head">
+                        <span class="improve-pct" id="improve-pct"></span>
+                        <span class="improve-set" id="improve-set"></span>
+                    </div>
+                    <div class="improve-track">
+                        <div class="improve-center"></div>
+                        <div class="improve-fill" id="improve-fill"></div>
+                    </div>
+                    <div class="improve-sub" id="improve-sub"></div>
                 </div>
                 <button type="submit" class="btn-primary">Log Set</button>
             </form>

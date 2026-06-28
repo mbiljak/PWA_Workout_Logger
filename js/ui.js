@@ -5,6 +5,9 @@ window.step = (id, amount) => {
     const newVal = currentVal + amount;
     const clampZero = id === 'reps' || id === 'duration' || id === 'set-reps' || id === 'set-duration';
     el.value = clampZero ? Math.max(0, newVal) : newVal;
+    // Fire `input` so anything listening (e.g. the live improvement bar) updates,
+    // just as it would when the value is typed.
+    el.dispatchEvent(new Event('input', { bubbles: true }));
 };
 
 // Chart.js (~200KB) is only needed for the Analysis trend chart. Load it on
@@ -38,6 +41,17 @@ function loadOf(set, def, bw) {
     if (def?.tracking === 'bodyweight')
         return Math.max(0, bw * (def.bwFraction ?? 1) + (set.weight || 0));
     return set.weight || 0;
+}
+
+// Single comparable "performance" number for one set, per tracking type:
+// e1RM (weighted / loaded-bodyweight), reps (banded / pure bodyweight), or
+// seconds (timed). Used for trend arrows and the log-form improvement bar so
+// every comparison is single-sourced.
+function setMetric(set, def, bw) {
+    const t = def?.tracking || 'weighted';
+    if (t === 'timed')  return set.duration || 0;
+    if (t === 'banded') return set.reps || 0;
+    return e1rm(loadOf(set, def, bw), set.reps || 0);
 }
 
 // Unified per-set volume comparable across all tracking types.
@@ -350,7 +364,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const weightInput    = document.getElementById('weight');
     const repsInput      = document.getElementById('reps');
     const durationInput  = document.getElementById('duration');
-    const notesInput     = document.getElementById('notes');
 
     const groupWeight    = document.getElementById('group-weight');
     const groupReps      = document.getElementById('group-reps');
@@ -358,6 +371,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupBand      = document.getElementById('group-band');
     const weightLabel    = document.getElementById('weight-label');
     const bandSegmented  = document.getElementById('band-segmented');
+
+    // Improvement bar (replaces the old notes field on the Log form)
+    const improveBar     = document.getElementById('improve-bar');
+    const improvePct     = document.getElementById('improve-pct');
+    const improveSetEl   = document.getElementById('improve-set');
+    const improveFill    = document.getElementById('improve-fill');
+    const improveSub     = document.getElementById('improve-sub');
 
     // --- STATE ---
     let allExercises    = []; // [{ name, lastWeight, lastReps, def }]
@@ -574,7 +594,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (item.lastWeight !== null) weightInput.value = item.lastWeight;
         if (item.lastReps   !== null) repsInput.value   = item.lastReps;
         closeDropdown();
-        notesInput.focus();
+        loadImproveCtx(item.name); // refresh the "vs last session" comparison
     }
 
     function applyTracking(def) {
@@ -597,10 +617,111 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             currentBand = btn.dataset.band;
             bandSegmented.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+            renderImproveBar();
         };
         btn.addEventListener('touchend', pick);
         btn.addEventListener('click', pick);
     });
+
+    // ── Improvement bar ───────────────────────────────────────────────────────
+    // Compares the set you're about to log against the SAME-ORDER set of the
+    // previous session for this exercise (set 2 vs set 2, etc.), using the
+    // tracking-appropriate metric (e1RM / reps / seconds). The DB lookup is cached
+    // per exercise in `improveCtx` so live weight/reps edits re-render synchronously.
+    let improveCtx = null; // { exercise, prevSets:[], todayCount, def, bw }
+    const IMPROVE_CAP = 25; // % delta that fills half the track
+
+    async function loadImproveCtx(name) {
+        if (!name) { improveCtx = null; renderImproveBar(); return; }
+        const def     = getDef(name);
+        const daySets = await DB.getLastSessionAllSets(name);
+        const prevSets = daySets
+            .filter(s => s.exercise === name)
+            .sort((a, b) => a.timestamp - b.timestamp);
+        const today = (await DB.getTodaySets()).filter(s => s.exercise === name);
+        improveCtx = { exercise: name, prevSets, todayCount: today.length, def, bw: getBodyweight() };
+        renderImproveBar();
+    }
+
+    function currentFormSet() {
+        return {
+            weight:    parseFloat(weightInput.value)  || 0,
+            reps:      parseInt(repsInput.value)       || 0,
+            duration:  parseInt(durationInput.value)   || 0,
+            bandLevel: currentBand,
+        };
+    }
+
+    function renderImproveBar() {
+        // Hide unless the loaded context matches the exercise currently in the field.
+        if (!improveCtx || improveCtx.exercise !== exerciseInput.value.trim()) {
+            improveBar.classList.add('hidden');
+            return;
+        }
+        improveBar.classList.remove('hidden');
+
+        const { prevSets, todayCount, def, bw } = improveCtx;
+        const setNo = todayCount + 1;                 // the set about to be logged
+        const prev  = prevSets[todayCount];           // same-order set last session
+        const cur   = currentFormSet();
+        const hasInput = currentTracking === 'timed' ? cur.duration > 0 : cur.reps > 0;
+
+        improveSetEl.textContent = `Set ${setNo}`;
+
+        const setBar = (state, pct) => {
+            improveBar.dataset.state = state;          // none | up | down | even | new | first
+            // Diverging fill: grows from the centre, right for gains, left for losses.
+            const mag = Math.min(Math.abs(pct ?? 0), IMPROVE_CAP) / IMPROVE_CAP * 50;
+            if (state === 'up') {
+                improveFill.style.left = '50%'; improveFill.style.right = 'auto';
+                improveFill.style.width = mag + '%';
+            } else if (state === 'down') {
+                improveFill.style.right = '50%'; improveFill.style.left = 'auto';
+                improveFill.style.width = mag + '%';
+            } else {
+                improveFill.style.width = '0%';
+            }
+        };
+
+        if (!prevSets.length) {                        // never trained before
+            improvePct.textContent = 'First time';
+            improveSub.textContent = 'No previous session to compare';
+            setBar('first');
+            return;
+        }
+        if (!prev) {                                   // beyond last session's set count
+            improvePct.textContent = 'New ground';
+            improveSub.textContent = `Last session had ${prevSets.length} set${prevSets.length !== 1 ? 's' : ''}`;
+            setBar('new');
+            return;
+        }
+
+        const prevMetric = setMetric(prev, def, bodyweightAt(prev.timestamp));
+        improveSub.textContent = `Last set ${setNo}: ${formatSet(prev)}`;
+
+        if (!hasInput || prevMetric <= 0) {            // nothing entered yet → show the target
+            improvePct.textContent = 'vs last';
+            setBar('none');
+            return;
+        }
+
+        const curMetric = setMetric(cur, def, bw);
+        const pct = (curMetric / prevMetric - 1) * 100;
+        if (Math.abs(pct) < 0.5) {
+            improvePct.textContent = 'Even';
+            setBar('even');
+        } else if (pct > 0) {
+            improvePct.textContent = `▲ ${pct.toFixed(pct < 10 ? 1 : 0)}%`;
+            setBar('up', pct);
+        } else {
+            improvePct.textContent = `▼ ${Math.abs(pct).toFixed(pct > -10 ? 1 : 0)}%`;
+            setBar('down', pct);
+        }
+    }
+
+    // Live-update the bar as the numbers change.
+    [weightInput, repsInput, durationInput].forEach(el =>
+        el.addEventListener('input', renderImproveBar));
 
     exerciseInput.addEventListener('focus', () => {
         exerciseInput.select();   // typing replaces; tapping away keeps the value
@@ -609,6 +730,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     exerciseInput.addEventListener('input', () => {
         renderDropdown(exerciseInput.value);
+        renderImproveBar(); // hide the comparison while the name no longer matches
+    });
+
+    // Typed the full name (no dropdown tap)? Load the comparison on commit.
+    exerciseInput.addEventListener('change', () => {
+        const name = exerciseInput.value.trim();
+        if (name && (!improveCtx || improveCtx.exercise !== name)
+            && allExercises.some(e => e.name === name))
+            loadImproveCtx(name);
     });
 
     document.addEventListener('touchstart', (e) => {
@@ -709,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 exercise: exerciseInput.value.trim(),
                 weight:   parseFloat(weightInput.value) || 0,
                 reps:     parseInt(repsInput.value)     || 0,
-                notes:    notesInput.value.trim(),
+                notes:    '', // notes are added later via the edit-set modal
             };
             if (currentTracking === 'timed')  set.duration  = parseInt(durationInput.value) || 0;
             if (currentTracking === 'banded') set.bandLevel = currentBand;
@@ -721,7 +851,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const customWarn = avgIntraRestMs(lastSets, set.exercise) ?? WARN_MS;
             startTimer(Date.now(), customWarn);
 
-            notesInput.value = '';
+            loadImproveCtx(set.exercise); // advance the comparison to the next set's order
 
             await refreshExerciseCache();
 
@@ -805,66 +935,155 @@ document.addEventListener('DOMContentLoaded', () => {
         sets.forEach(s => { (dayMap[dayKey(s.timestamp)] ||= []).push(s); });
 
         // ── Heatmap ──────────────────────────────────────────────────────────────
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        const start = new Date(today); start.setDate(start.getDate() - 83);
-        start.setDate(start.getDate() - start.getDay()); // back up to Sunday
-        const weeks = Math.ceil((Math.round((today - start) / 86400000) + 1) / 7);
+        // A focused window of 1M / 3M that you page through time with ‹ › arrows.
+        // Cells are sized to fit the card width (never scrolls) and re-render with a
+        // left→right wave-in on every change.
+        const HEAT_RANGES = [{ days: 30, label: '1M', weeks: 5 },
+                             { days: 90, label: '3M', weeks: 13 }];
+        let heatRange = parseInt(localStorage.getItem('heat_range')) || 90;
+        if (!HEAT_RANGES.some(r => r.days === heatRange)) heatRange = 90;
+        let heatOffset = 0; // whole-window pages back from today (0 = up to today)
+
+        // Earliest training day — stops paging into empty pre-history. `sets` is
+        // newest-first (getAllSets), so the last element is the oldest.
+        const earliestDay = new Date(sets.length ? sets[sets.length - 1].timestamp : Date.now());
+        earliestDay.setHours(0, 0, 0, 0);
+
+        // Header: ‹ window-label › on the left, range slider on the right.
+        const controls = document.createElement('div');
+        controls.className = 'heat-controls';
+        const nav = document.createElement('div');
+        nav.className = 'heat-nav';
+        nav.innerHTML =
+            `<button type="button" class="heat-arrow" data-dir="-1" aria-label="Earlier">‹</button>` +
+            `<span class="heat-range-label"></span>` +
+            `<button type="button" class="heat-arrow" data-dir="1" aria-label="Later">›</button>`;
+        const rangeLabel = nav.querySelector('.heat-range-label');
+        const prevBtn    = nav.querySelector('[data-dir="-1"]');
+        const nextBtn    = nav.querySelector('[data-dir="1"]');
+        const slider = document.createElement('div');
+        slider.className = 'heat-range';
+        slider.innerHTML = `<div class="hr-thumb"></div>` +
+            HEAT_RANGES.map(r => `<button type="button" data-days="${r.days}">${r.label}</button>`).join('');
+        const thumb     = slider.querySelector('.hr-thumb');
+        const rangeBtns = [...slider.querySelectorAll('button')];
+        const positionThumb = () => {
+            const idx = Math.max(0, HEAT_RANGES.findIndex(r => r.days === heatRange));
+            thumb.style.transform = `translateX(${idx * 100}%)`;
+            rangeBtns.forEach((b, i) => b.classList.toggle('active', i === idx));
+        };
+        rangeBtns.forEach(btn => btn.addEventListener('click', () => {
+            heatRange  = parseInt(btn.dataset.days);
+            heatOffset = 0; // switching range jumps back to the current window
+            localStorage.setItem('heat_range', String(heatRange));
+            positionThumb();
+            renderHeatmap();
+        }));
+        prevBtn.addEventListener('click', () => { if (!prevBtn.disabled) { heatOffset++;     renderHeatmap(); } });
+        nextBtn.addEventListener('click', () => { if (heatOffset > 0)    { heatOffset--;     renderHeatmap(); } });
+        controls.append(nav, slider);
+        container.appendChild(controls);
 
         const heatWrap = document.createElement('div');
         heatWrap.className = 'heat-wrap';
-
         const monthRow = document.createElement('div');
         monthRow.className = 'heat-months';
-        let lastMonth = -1;
-        for (let w = 0; w < weeks; w++) {
-            const d = new Date(start); d.setDate(d.getDate() + w * 7);
-            const lbl = document.createElement('span');
-            if (d.getMonth() !== lastMonth) {
-                lbl.textContent = d.toLocaleDateString('en-US', { month: 'short' });
-                lastMonth = d.getMonth();
-            }
-            monthRow.appendChild(lbl);
-        }
-
         const heatmap = document.createElement('div');
         heatmap.className = 'heatmap';
-        for (let i = 0; i < weeks * 7; i++) {
-            const d = new Date(start); d.setDate(d.getDate() + i);
-            const cell = document.createElement('div');
-            cell.className = 'heat-cell';
-            if (d > today) { cell.classList.add('heat-future'); heatmap.appendChild(cell); continue; }
-            if (d.getTime() === today.getTime()) cell.classList.add('heat-today');
-
-            const dateKey  = d.toLocaleDateString();
-            const daySets  = dayMap[dateKey];
-            if (daySets) {
-                const profile = dayCategoryProfile(daySets);
-                if (isGtgDay(daySets)) {
-                    // Sparse / greasing the groove: don't "fill" the square — just mark
-                    // it with a dot tinted by the day's dominant category.
-                    cell.classList.add('heat-gtg');
-                    cell.style.setProperty('--gtg-dot', CAT_COLOR[profile.dominant] || 'rgba(255,255,255,0.9)');
-                } else if (profile.mixed) {
-                    const grad = proportionalGradient(profile.counts);
-                    if (grad) cell.style.background = grad;
-                    else cell.classList.add('heat-mixed');
-                } else if (profile.dominant) {
-                    cell.classList.add(`heat-${profile.dominant}`);
-                }
-
-                cell.addEventListener('click', () => {
-                    const isSame = activeDateFilter === dateKey;
-                    activeDateFilter = isSame ? null : dateKey;
-                    heatmap.querySelectorAll('.heat-cell').forEach(c => c.classList.remove('selected'));
-                    if (!isSame) cell.classList.add('selected');
-                    renderSessions();
-                });
-            }
-            heatmap.appendChild(cell);
-        }
-        heatWrap.appendChild(monthRow);
-        heatWrap.appendChild(heatmap);
+        heatWrap.append(monthRow, heatmap);
         container.appendChild(heatWrap);
+
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function renderHeatmap() {
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const weeks = (HEAT_RANGES.find(r => r.days === heatRange) || HEAT_RANGES[1]).weeks;
+
+            // Window of `weeks` whole weeks (Sun-aligned), shifted back by whole pages.
+            const start = new Date(today);
+            start.setDate(start.getDate() - start.getDay()); // this week's Sunday
+            start.setDate(start.getDate() - (weeks - 1 + heatOffset * weeks) * 7);
+
+            // Window label + arrow availability.
+            const winEnd   = new Date(start); winEnd.setDate(winEnd.getDate() + weeks * 7 - 1);
+            const labelEnd = winEnd > today ? today : winEnd;
+            const opt = { month: 'short', day: 'numeric' };
+            rangeLabel.textContent = `${start.toLocaleDateString('en-US', opt)} – ${labelEnd.toLocaleDateString('en-US', opt)}`;
+            nextBtn.disabled = heatOffset === 0;
+            prevBtn.disabled = start.getTime() <= earliestDay.getTime();
+            [[nextBtn], [prevBtn]].forEach(([b]) => b.classList.toggle('is-disabled', b.disabled));
+
+            // Size cells so the whole grid fits the card width — no horizontal scroll.
+            const avail = Math.min(window.innerWidth, 600) - 56; // main + heat-wrap padding
+            const gap   = 3;
+            const cell  = Math.max(8, Math.min(20, Math.floor((avail - (weeks - 1) * gap) / weeks)));
+            [heatmap, monthRow].forEach(el => {
+                el.style.setProperty('--cell', cell + 'px');
+                el.style.setProperty('--gap', gap + 'px');
+            });
+
+            monthRow.innerHTML = '';
+            let lastMonth = -1, lastLabelWeek = -99;
+            const minLabelCols = Math.ceil(22 / (cell + gap)); // keep labels from colliding
+            for (let w = 0; w < weeks; w++) {
+                const d = new Date(start); d.setDate(d.getDate() + w * 7);
+                const lbl = document.createElement('span');
+                if (d.getMonth() !== lastMonth) {
+                    lastMonth = d.getMonth();
+                    if (w - lastLabelWeek >= minLabelCols) {
+                        lbl.textContent = d.toLocaleDateString('en-US', { month: 'short' });
+                        lastLabelWeek = w;
+                    }
+                }
+                monthRow.appendChild(lbl);
+            }
+
+            heatmap.innerHTML = '';
+            for (let i = 0; i < weeks * 7; i++) {
+                const d = new Date(start); d.setDate(d.getDate() + i);
+                const cellEl = document.createElement('div');
+                cellEl.className = 'heat-cell';
+                // Wave-in: oldest column (left) first, sweeping right, offset down each row.
+                if (!reduceMotion) {
+                    const week = Math.floor(i / 7), row = i % 7;
+                    cellEl.classList.add('heat-animate');
+                    cellEl.style.animationDelay = (week * 22 + row * 10) + 'ms';
+                }
+                if (d > today) { cellEl.classList.add('heat-future'); heatmap.appendChild(cellEl); continue; }
+                if (d.getTime() === today.getTime()) cellEl.classList.add('heat-today');
+
+                const dateKey  = d.toLocaleDateString();
+                if (dateKey === activeDateFilter) cellEl.classList.add('selected');
+                const daySets  = dayMap[dateKey];
+                if (daySets) {
+                    const profile = dayCategoryProfile(daySets);
+                    if (isGtgDay(daySets)) {
+                        // Sparse / greasing the groove: don't "fill" the square — just mark
+                        // it with a dot tinted by the day's dominant category.
+                        cellEl.classList.add('heat-gtg');
+                        cellEl.style.setProperty('--gtg-dot', CAT_COLOR[profile.dominant] || 'rgba(255,255,255,0.9)');
+                    } else if (profile.mixed) {
+                        const grad = proportionalGradient(profile.counts);
+                        if (grad) cellEl.style.background = grad;
+                        else cellEl.classList.add('heat-mixed');
+                    } else if (profile.dominant) {
+                        cellEl.classList.add(`heat-${profile.dominant}`);
+                    }
+
+                    cellEl.addEventListener('click', () => {
+                        const isSame = activeDateFilter === dateKey;
+                        activeDateFilter = isSame ? null : dateKey;
+                        heatmap.querySelectorAll('.heat-cell').forEach(c => c.classList.remove('selected'));
+                        if (!isSame) cellEl.classList.add('selected');
+                        renderSessions();
+                    });
+                }
+                heatmap.appendChild(cellEl);
+            }
+        }
+
+        positionThumb();
+        renderHeatmap();
 
         // Legend (includes GTG dot entry)
         const legend = document.createElement('div');
@@ -1058,6 +1277,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function refreshSetViews() {
         loadTodaySets();
         historyDirty = true; // a set changed — History must rebuild before next view
+        // A delete/edit changes today's set count, so the improvement bar's set
+        // order is now stale — refresh it for whatever exercise is in the form.
+        if (exerciseInput.value.trim()) loadImproveCtx(exerciseInput.value.trim());
         // If History is open right now, refresh it — but after the current
         // interaction/animation settles, so the rebuild never janks a transition.
         if (!document.getElementById('view-history').classList.contains('hidden'))
@@ -1235,7 +1457,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const prSet = sets.reduce((b, s) => e1rm(loadAt(s), s.reps) > e1rm(loadAt(b), b.reps) ? s : b);
             const prVal = Math.round(e1rm(loadAt(prSet), prSet.reps));
             const bwNote = (tracking === 'bodyweight' && !getBodyweight())
-                ? ` <span class="pr-e1rm">⚠️ set your bodyweight in Settings</span>` : '';
+                ? ` <span class="pr-warn">Set your bodyweight in Settings</span>` : '';
             prHtml = `<span class="pr-set">${formatSet(prSet)}</span>
                       <span class="pr-e1rm">e1RM: ${prVal} lbs · ${dated(prSet.timestamp)}</span>${bwNote}`;
         } else {
@@ -1245,13 +1467,13 @@ document.addEventListener('DOMContentLoaded', () => {
             barLabel  = 'Volume (lbs)'; barAxis = 'Volume (lbs)';
             const prSet = sets.reduce((b, s) => (s.reps||0) > (b.reps||0) ? s : b);
             const bwNote = !getBodyweight()
-                ? ` <span class="pr-e1rm">⚠️ set your bodyweight in Settings for volume</span>` : '';
+                ? ` <span class="pr-warn">Set your bodyweight in Settings for volume</span>` : '';
             prHtml = `<span class="pr-set">${prSet.reps} reps</span>
                       <span class="pr-e1rm">Most reps · ${dated(prSet.timestamp)}</span>${bwNote}`;
         }
 
         prCard.className = 'pr-card';
-        prCard.innerHTML = `<span class="pr-label">🏆 PR Set</span>${prHtml}`;
+        prCard.innerHTML = `<span class="pr-label">PR Set</span>${prHtml}`;
 
         // Avg rest from previous session (async — appended after chart renders).
         DB.getLastSessionAllSets(exerciseName).then(lastSets => {
@@ -1259,7 +1481,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (avgMs !== null) {
                 const restSpan = document.createElement('span');
                 restSpan.className = 'pr-rest';
-                restSpan.textContent = `⏱ Avg rest last session: ${fmtDuration(Math.round(avgMs / 1000))}`;
+                restSpan.textContent = `Avg rest last session: ${fmtDuration(Math.round(avgMs / 1000))}`;
                 prCard.appendChild(restSpan);
             }
         });
@@ -1341,7 +1563,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Accuracy of this model on the user's own log (only shown with enough history).
             const bt = backtestPrediction(sets, tracking);
             const btBadge = bt
-                ? `<span class="predict-acc" title="Reached this target in ${bt.hits} of ${bt.tested} recent sessions">${bt.rate}%</span>`
+                ? `<span class="predict-acc" title="Reached this target in ${bt.hits} of ${bt.tested} recent sessions">${bt.rate}% likelihood</span>`
                 : '';
             predictCard.innerHTML = `
                 <div class="predict-head">
@@ -1355,15 +1577,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ── Flat set log (newest first) ──────────────────────────────────────────
+        // Each row carries a proportional fill bar so the e1RM scale (or the
+        // tracking-appropriate metric) is visible at a glance down the list.
         const byNewest = [...sets].sort((a, b) => b.timestamp - a.timestamp);
         const dShort = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const scaleOf = (s) => useE1rm ? e1rm(loadAt(s), s.reps || 0)
+                             : tracking === 'timed' ? (s.duration || 0)
+                             : (s.reps || 0);
+        const maxScale = Math.max(1, ...sets.map(scaleOf));
+        const scaleUnit = useE1rm ? 'e1RM' : tracking === 'timed' ? 'best hold' : 'reps';
         setLogEl.innerHTML =
-            `<div class="set-log-title">All sets · ${sets.length}</div>` +
+            `<div class="set-log-title">All sets · ${sets.length} <span class="set-log-scale">bar = ${scaleUnit} scale</span></div>` +
             byNewest.map(s => {
-                const cat   = getCategory(exerciseName);
                 const e1    = useE1rm ? Math.round(e1rm(loadAt(s), s.reps || 0)) : null;
                 const notes = (s.notes && s.notes !== 'Imported from CSV') ? s.notes : '';
+                const pct   = Math.round(scaleOf(s) / maxScale * 100);
                 return `<div class="set-log-row"${cat ? ` data-cat="${cat}"` : ''}>
+                    <div class="sl-fill" style="width:${pct}%"></div>
                     <span class="sl-date">${dShort(s.timestamp)}</span>
                     <span class="sl-set">${formatSet(s)}</span>
                     <span class="sl-e1rm">${e1 ? `e1RM ${e1}` : ''}</span>
