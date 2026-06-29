@@ -889,7 +889,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .map(s => dayKey(s.timestamp))
         ).size;
         const totalVolume = Math.round(sets.reduce((a, s) => a + setVolume(s), 0));
-        const fmtVol = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : v.toLocaleString();
+        const fmtVol = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : Math.round(v).toLocaleString();
 
         const statsRow = document.createElement('div');
         statsRow.className = 'stats-row';
